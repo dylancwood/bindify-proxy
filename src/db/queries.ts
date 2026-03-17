@@ -1,4 +1,4 @@
-import type { User, Connection, Subscription } from '@bindify/shared/types';
+import type { User, Connection, Subscription } from '@bindify/types';
 
 export async function getUserById(db: D1Database, id: string): Promise<User | null> {
   return db.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<User>();

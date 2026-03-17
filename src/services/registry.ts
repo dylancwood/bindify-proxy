@@ -1,4 +1,4 @@
-import type { ServiceId } from '../../../../shared/types';
+import type { ServiceId } from '@bindify/types';
 import type { ServiceDefinition } from './types';
 import { linear } from './linear';
 import { todoist } from './todoist';

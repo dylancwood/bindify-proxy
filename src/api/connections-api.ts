@@ -1,5 +1,5 @@
 import { getConnectionsByUserId, deleteConnection, updateConnectionLabel } from '../db/queries';
-import type { Connection } from '../../../../shared/types';
+import type { Connection } from '@bindify/types';
 
 const SERVICE_NAMES: Record<string, string> = {
   linear: 'Linear',

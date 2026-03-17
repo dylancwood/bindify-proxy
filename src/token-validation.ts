@@ -1,4 +1,4 @@
-import type { TokenData } from '../../../shared/types';
+import type { TokenData } from '@bindify/types';
 
 export interface PreWriteValidationResult {
   valid: boolean;

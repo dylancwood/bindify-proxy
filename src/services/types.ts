@@ -1,4 +1,4 @@
-import type { ServiceId, TokenData } from '../../../../shared/types';
+import type { ServiceId, TokenData } from '@bindify/types';
 
 export interface ApiKeyInjectHeader {
   type: 'header';

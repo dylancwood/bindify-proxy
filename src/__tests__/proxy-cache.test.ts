@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { buildProxyCacheEntry, withProxyCache, deleteProxyCache, checkCachedAccessActive, decryptCacheTokens, PROXY_CACHE_SCHEMA_VERSION } from '../proxy/kv-cache';
 import { getManagedEncryptionKeys } from '../index';
-import type { Connection, User } from '@bindify/shared/types';
+import type { Connection, User } from '@bindify/types';
 import { SELF, env } from 'cloudflare:test';
 import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey } from '../crypto';
 import { makeFixedCredentials } from './test-helpers';

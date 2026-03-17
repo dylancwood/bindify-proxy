@@ -1,5 +1,5 @@
 import type { Env } from '../index';
-import type { Connection } from '../../../../shared/types';
+import type { Connection } from '@bindify/types';
 import { writeConnectionEvent } from '../db/connection-events';
 import { setNeedsReauthAt } from '../db/queries';
 import { log } from '../logger';

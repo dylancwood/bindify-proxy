@@ -1,5 +1,5 @@
 import type { Env } from '../index';
-import type { ServiceId, TokenData, Connection } from '../../../../shared/types';
+import type { ServiceId, TokenData, Connection } from '@bindify/types';
 import { getService } from '../services/registry';
 import { checkCanConnect } from '../auth/entitlements';
 import { createConnection, updateConnectionLastRefreshed, getConnectionsByUserId, getConnectionById, deleteConnection, getUserById, getSubscriptionsByUserId, updateConnectionStatus, setSuspendedAt } from '../db/queries';

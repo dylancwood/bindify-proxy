@@ -3,7 +3,7 @@ import { env } from 'cloudflare:test';
 import { checkKvD1Consistency } from '../consistency';
 import { buildProxyCacheEntry, writeProxyCache, type ProxyCacheEntry } from '../proxy/kv-cache';
 import { createUser, createConnection } from '../db/queries';
-import type { Connection, User } from '../../../../shared/types';
+import type { Connection, User } from '@bindify/types';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (

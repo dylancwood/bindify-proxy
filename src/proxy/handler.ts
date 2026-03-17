@@ -1,5 +1,5 @@
 import type { Env } from '../index';
-import type { TokenData, ApiKeyData } from '../../../../shared/types';
+import type { TokenData, ApiKeyData } from '@bindify/types';
 import { parseApiKey } from './resolve';
 import { getService } from '../services/registry';
 import { updateConnectionLastUsed, updateConnectionStatus, setSuspendedAt, clearNeedsReauthAt, setNeedsReauthAt, getUserById, getSubscriptionsByUserId, acquireRefreshLock } from '../db/queries';

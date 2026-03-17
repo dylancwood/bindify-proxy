@@ -1,4 +1,4 @@
-import type { Connection, User, TokenData, ApiKeyData } from '../../../../shared/types';
+import type { Connection, User, TokenData, ApiKeyData } from '@bindify/types';
 import type { Env } from '../index';
 import type { AccessActiveResult } from '../auth/entitlements';
 import { decryptTokenData, deriveManagedEncryptionKey, decryptTokenDataWithKey, getManagedKey } from '../crypto';

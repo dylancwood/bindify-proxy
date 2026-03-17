@@ -1,4 +1,4 @@
-import type { TokenData, ApiKeyData } from '../../../shared/types';
+import type { TokenData, ApiKeyData } from '@bindify/types';
 
 /**
  * Defensively parses a token endpoint response body.

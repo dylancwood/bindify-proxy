@@ -1,4 +1,4 @@
-import type { User } from '@bindify/shared/types';
+import type { User } from '@bindify/types';
 import { getUserById, createUser, updateUserEmail } from '../db/queries';
 
 export class MaxUsersReachedError extends Error {

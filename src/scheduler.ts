@@ -1,5 +1,5 @@
 import type { Env } from './index';
-import type { Connection, TokenData } from '../../../shared/types';
+import type { Connection, TokenData } from '@bindify/types';
 import { getStaleConnections, updateConnectionLastRefreshed, updateConnectionStatus, setNeedsReauthAt, clearNeedsReauthAt, cleanupExpiredRefreshLocks } from './db/queries';
 import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, getManagedKey, getActiveKeyVersion } from './crypto';
 import { getManagedEncryptionKeys } from './index';

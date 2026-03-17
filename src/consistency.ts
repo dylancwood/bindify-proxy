@@ -1,5 +1,5 @@
 import type { Env } from './index';
-import type { Connection, User } from '../../../shared/types';
+import type { Connection, User } from '@bindify/types';
 import { buildProxyCacheEntry, writeProxyCache, PROXY_CACHE_SCHEMA_VERSION, type ProxyCacheEntry } from './proxy/kv-cache';
 import { insertAnomalyReport, hasUnacknowledgedAnomaly } from './db/anomaly-reports';
 import { REFRESH_CONFIG } from './services/refresh-config';
