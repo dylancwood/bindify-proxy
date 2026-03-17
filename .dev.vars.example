@@ -1,0 +1,60 @@
+# Bindify API Worker — Development Environment Variables
+# Copy this file to .dev.vars and fill in your values.
+
+# ── Clerk (authentication) ─────────────────────────────────────────
+# Create a Clerk app at https://clerk.com
+ADMIN_URL=http://localhost:5173
+CLERK_JWKS_URL=https://YOUR_CLERK_INSTANCE.clerk.accounts.dev/.well-known/jwks.json
+CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+
+# ── OAuth Providers ────────────────────────────────────────────────
+# Register OAuth apps with each provider you want to support.
+
+# Linear: https://linear.app/settings/api
+LINEAR_CLIENT_ID=
+LINEAR_CLIENT_SECRET=
+
+# Todoist: https://developer.todoist.com/appconsole.html
+TODOIST_CLIENT_ID=
+TODOIST_CLIENT_SECRET=
+
+# Figma: https://www.figma.com/developers/apps
+FIGMA_CLIENT_ID=
+FIGMA_CLIENT_SECRET=
+
+# Atlassian: https://developer.atlassian.com/console/myapps/
+ATLASSIAN_CLIENT_ID=
+ATLASSIAN_CLIENT_SECRET=
+
+# GitHub: https://github.com/settings/developers
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# Notion: https://www.notion.so/my-integrations
+# (Notion uses OAuth for public integrations)
+NOTION_CLIENT_ID=
+NOTION_CLIENT_SECRET=
+
+# ── Stripe (billing) ──────────────────────────────────────────────
+# Create a Stripe account at https://stripe.com
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_CONNECTIONS=price_...
+
+# ── Encryption ─────────────────────────────────────────────────────
+# Generate with: openssl rand -hex 32
+# Used to encrypt OAuth tokens at rest (managed mode).
+MANAGED_ENCRYPTION_MASTER_KEY=
+
+# ── Email Notifications (optional) ─────────────────────────────────
+# SMTP2GO account at https://www.smtp2go.com
+# SMTP2GO_API_KEY=api-...
+# ADMIN_NOTIFICATION_EMAIL=admin@yourdomain.com
+
+# ── Zoho Desk (optional, for support tickets) ──────────────────────
+# ZOHO_CLIENT_ID=
+# ZOHO_CLIENT_SECRET=
+# ZOHO_REFRESH_TOKEN=
+# ZOHO_ORG_ID=
+# ZOHO_DEPARTMENT_ID=
