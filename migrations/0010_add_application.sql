@@ -1,0 +1,1 @@
+ALTER TABLE connections ADD COLUMN application TEXT DEFAULT NULL;

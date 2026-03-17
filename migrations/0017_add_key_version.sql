@@ -1,0 +1,1 @@
+ALTER TABLE connections ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;
