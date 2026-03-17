@@ -1,4 +1,16 @@
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { readFileSync } from 'node:fs';
+
+// Load .env.test into process.env for integration tests (e.g. LINEAR_TEST_API_KEY)
+try {
+  const envTest = readFileSync('.env.test', 'utf-8');
+  for (const line of envTest.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq > 0) process.env[trimmed.slice(0, eq)] ??= trimmed.slice(eq + 1);
+  }
+} catch {}
 
 export default defineWorkersConfig({
   test: {
@@ -19,6 +31,7 @@ export default defineWorkersConfig({
             ]),
             MANAGED_ENCRYPTION_MASTER_KEY: 'test-master-key-0123456789abcdef0123456789abcdef',
             CONFIG: JSON.stringify({ proxyCacheTtlSeconds: 3600, refreshLockTtlSeconds: 3 }),
+            ...(process.env.LINEAR_TEST_API_KEY ? { LINEAR_TEST_API_KEY: process.env.LINEAR_TEST_API_KEY } : {}),
           },
         },
       },

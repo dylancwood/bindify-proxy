@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
+import { env } from 'cloudflare:test';
 import { validateUpstreamApiKey, buildUpstreamRequest } from '../api/validate-api-key';
 import type { ApiKeyConfig } from '../services/types';
 import { linear } from '../services/linear';
 import { atlassian } from '../services/atlassian';
+
+const LINEAR_TEST_API_KEY = (env as Record<string, string>).LINEAR_TEST_API_KEY;
 
 const headerConfig: ApiKeyConfig = {
   inject: { type: 'header', name: 'Authorization', prefix: 'Bearer ' },
@@ -135,15 +138,14 @@ describe('Linear API key config', () => {
     expect((calledInit.headers as Record<string, string>)['Authorization']).toBe('lin_api_invalid');
   });
 
-  it('linear accepts valid API key (integration)', async () => {
+  it.skipIf(!LINEAR_TEST_API_KEY)('linear accepts valid API key (integration)', async () => {
     const config = linear.config.apiKey!;
-    const mockFetch = vi.fn().mockResolvedValue({ status: 200 });
-    const result = await validateUpstreamApiKey('lin_api_test_placeholder_key_not_real', config, mockFetch);
+    const result = await validateUpstreamApiKey(LINEAR_TEST_API_KEY!, config);
     expect(result.valid).toBe(true);
     expect(result.status).toBe(200);
   }, 10_000);
 
-  it('linear rejects invalid API key (integration)', async () => {
+  it.skipIf(!LINEAR_TEST_API_KEY)('linear rejects invalid API key (integration)', async () => {
     const config = linear.config.apiKey!;
     const result = await validateUpstreamApiKey('lin_api_invalid_key_12345', config);
     expect(result.valid).toBe(false);

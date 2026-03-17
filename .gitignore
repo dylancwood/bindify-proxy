@@ -2,6 +2,7 @@
 wrangler.toml
 .dev.vars
 .prod.vars
+.env.test
 
 # Dependencies
 node_modules/

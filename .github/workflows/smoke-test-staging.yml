@@ -1,0 +1,36 @@
+name: Smoke Test Staging
+
+on:
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ["Deploy Staging"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Wait for deployment propagation
+        run: sleep 15
+
+      - name: Check Worker health
+        run: |
+          STATUS=$(curl -s --max-time 30 -o /dev/null -w '%{http_code}' https://api.stg.bindify.dev/)
+          echo "Worker status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Worker health check failed with status $STATUS"
+            exit 1
+          fi
+
+      - name: Check Worker version header
+        run: |
+          VERSION=$(curl -s --max-time 30 -I https://api.stg.bindify.dev/ | grep -i 'x-bindify-version' | tr -d '\r')
+          echo "Version header: $VERSION"
+          if [ -z "$VERSION" ]; then
+            echo "::error::Missing x-bindify-version header"
+            exit 1
+          fi
