@@ -1,0 +1,13 @@
+# Secrets and config with real values
+wrangler.toml
+.dev.vars
+.prod.vars
+
+# Dependencies
+node_modules/
+
+# Wrangler state
+.wrangler/
+
+# OS
+.DS_Store
