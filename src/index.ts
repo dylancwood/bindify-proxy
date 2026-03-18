@@ -356,7 +356,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
     if (path === '/api/interest' && method === 'POST') {
       const body = await request.json().catch(() => ({})) as { service?: string };
-      const service = typeof body.service === 'string' ? body.service.slice(0, 64) : null;
+      const service = typeof body.service === 'string' ? body.service.slice(0, 64).replace(/[^a-zA-Z0-9_-]/g, '') : null;
       if (!service) {
         return addCorsHeaders(
           Response.json({ error: 'invalid_request', message: 'service is required' }, { status: 400 }),
@@ -489,6 +489,12 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
         if (typeof body.label !== 'string') {
           return addCorsHeaders(
             Response.json({ error: 'invalid_request', message: 'label is required' }, { status: 400 }),
+            env, request
+          );
+        }
+        if (body.label.length > 256) {
+          return addCorsHeaders(
+            Response.json({ error: 'invalid_request', message: 'label must be 256 characters or fewer' }, { status: 400 }),
             env, request
           );
         }

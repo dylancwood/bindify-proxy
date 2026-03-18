@@ -598,6 +598,11 @@ export async function handleApiKeyConnect(
     }
   }
 
+  // Build metadata for audit trail
+  const metadata = skipApplicationValidation
+    ? JSON.stringify({ skippedApplicationValidation: true, application: application ?? null })
+    : null;
+
   // Create connection in D1
   try {
     await createConnection(env.DB, {
@@ -615,6 +620,7 @@ export async function handleApiKeyConnect(
       encrypted_tokens: encryptedData,
       needs_reauth_at: null,
       key_version: 1,
+      metadata,
     });
   } catch (err) {
     // Restore old connection if new one fails to create
