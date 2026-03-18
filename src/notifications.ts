@@ -14,6 +14,7 @@ export async function sendNewUserNotification(
     return;
   }
 
+  const envPrefix = env.SECRET_ENV_PREFIX === 'live' ? '' : `[${(env.SECRET_ENV_PREFIX || 'dev').toUpperCase()}] `;
   const res = await fetch('https://api.smtp2go.com/v3/email/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -21,7 +22,7 @@ export async function sendNewUserNotification(
       api_key: env.SMTP2GO_API_KEY,
       to: [env.ADMIN_NOTIFICATION_EMAIL],
       sender: env.OPS_NOTIFICATION_ORIGIN_EMAIL ?? 'Bindify Notifications <notifications@bindify.dev>',
-      subject: 'New Bindify user signed up',
+      subject: `${envPrefix}New Bindify user signed up`,
       text_body: [
         'New user registered on Bindify.',
         '',
