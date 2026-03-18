@@ -19,6 +19,17 @@ import { parseConfig } from '../config';
 import { getManagedEncryptionKeys } from '../index';
 
 /**
+ * Thrown when exponential backoff is exhausted and a cool-down lock has been set.
+ * Callers should catch this and return a 503 response.
+ */
+export class RefreshCooldownError extends Error {
+  constructor(public connectionId: string) {
+    super(`Token refresh cool-down active for ${connectionId}`);
+    this.name = 'RefreshCooldownError';
+  }
+}
+
+/**
  * KV-based per-connection hourly rate limiter. Active only when
  * MCP_PROXY_RATE_LIMIT_PER_HOUR is set (staging). Returns a 429 Response
  * if the limit is exceeded, or null if the request should proceed.
@@ -303,6 +314,9 @@ async function performTokenRefresh(
 
   log.info('Token refreshed via proxy (lock-based)', { connectionId: entry.connectionId, service: serviceId });
 
+  // Clear cool-down lock on successful refresh
+  await env.KV.delete(`refresh_cooldown:${entry.connectionId}`);
+
   // Fire-and-forget success event
   const eventWrite = writeConnectionEvent(env.DB, {
     connectionId: entry.connectionId,
@@ -342,7 +356,9 @@ async function performTokenRefresh(
 
 /**
  * Attempt to refresh an expiring OAuth token using a D1-based lock.
- * Never throws — returns tokens (possibly stale) on any failure path.
+ * Uses exponential backoff when waiting for another request's refresh.
+ * Returns a 503 Response (via thrown RefreshCooldownError) if refresh is in cool-down.
+ * Never throws otherwise — returns tokens (possibly stale) on any failure path.
  */
 async function refreshTokenWithLock(
   env: Env,
@@ -378,6 +394,16 @@ async function refreshTokenWithLock(
     : true; // isExpiring is already true at this point
   if (!shouldRefresh) return tokens;
 
+  // Check cool-down lock before any lock acquisition
+  const cooldownKey = `refresh_cooldown:${entry.connectionId}`;
+  const cooldown = await env.KV.get(cooldownKey);
+  if (cooldown) {
+    // Token still valid — use it silently, don't 503
+    if (tokens.expires_at > now) return tokens;
+    // Token fully expired and cooldown active — signal 503
+    throw new RefreshCooldownError(entry.connectionId);
+  }
+
   const tokenStillValid = tokens.expires_at > now;
 
   // Try to acquire lock
@@ -399,47 +425,53 @@ async function refreshTokenWithLock(
     return tokens;
   }
 
-  // Token fully expired — wait and retry
-  await new Promise(resolve => setTimeout(resolve, config.refreshLockTtlSeconds * 1000));
+  // Token fully expired — exponential backoff polling
+  const backoffDelays = [100, 200, 400, 800, 1600];
+  const maxTotalWaitMs = 6000;
+  let totalWaited = 0;
 
-  // Re-read cache to check if winner refreshed
-  const refreshedRaw = await env.KV.get(`proxy:${secret1}`);
-  if (refreshedRaw) {
-    try {
-      const parsed = JSON.parse(refreshedRaw) as ProxyCacheEntry;
-      const refreshedTokens = await decryptCacheTokens(parsed, secret2, getManagedEncryptionKeys(env)) as TokenData;
-      if (refreshedTokens.expires_at > Math.floor(Date.now() / 1000)) {
-        return refreshedTokens;
+  for (const delay of backoffDelays) {
+    const waitTime = Math.min(delay, maxTotalWaitMs - totalWaited);
+    if (waitTime <= 0) break;
+
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+    totalWaited += waitTime;
+
+    // Re-read cache to check if winner refreshed
+    const refreshedRaw = await env.KV.get(`proxy:${secret1}`);
+    if (refreshedRaw) {
+      try {
+        const parsed = JSON.parse(refreshedRaw) as ProxyCacheEntry;
+        const refreshedTokens = await decryptCacheTokens(parsed, secret2, getManagedEncryptionKeys(env)) as TokenData;
+        if (refreshedTokens.expires_at > Math.floor(Date.now() / 1000)) {
+          return refreshedTokens;
+        }
+      } catch {
+        // Decryption failed — continue backoff
       }
-    } catch {
-      // Decryption failed — fall through to second attempt
     }
-  }
 
-  // Second attempt to acquire lock
-  try {
-    lockAcquired = await acquireRefreshLock(env.DB, entry.connectionId, config.refreshLockTtlSeconds);
-  } catch {
-    return tokens;
-  }
-
-  if (lockAcquired) {
-    return await performTokenRefresh(env, entry, tokens, secret2, serviceId, secret1, ctx);
-  }
-
-  // Final wait
-  await new Promise(resolve => setTimeout(resolve, config.refreshLockTtlSeconds * 1000));
-  const finalRaw = await env.KV.get(`proxy:${secret1}`);
-  if (finalRaw) {
+    // Try to acquire lock on each iteration
     try {
-      const parsed = JSON.parse(finalRaw) as ProxyCacheEntry;
-      return await decryptCacheTokens(parsed, secret2, getManagedEncryptionKeys(env)) as TokenData;
+      lockAcquired = await acquireRefreshLock(env.DB, entry.connectionId, config.refreshLockTtlSeconds);
     } catch {
-      // Fall through — return stale tokens
+      continue;
+    }
+
+    if (lockAcquired) {
+      return await performTokenRefresh(env, entry, tokens, secret2, serviceId, secret1, ctx);
     }
   }
 
-  return tokens;
+  // Backoff exhausted — set cool-down lock and signal 503
+  await env.KV.put(cooldownKey, new Date().toISOString(), { expirationTtl: 60 });
+  log.error('Token refresh backoff exhausted, entering cool-down', undefined, {
+    connectionId: entry.connectionId,
+    service: serviceId,
+  });
+
+  // Throw to signal caller to return 503
+  throw new RefreshCooldownError(entry.connectionId);
 }
 
 /**
@@ -480,6 +512,19 @@ async function buildAuthFromCache(
   const oauthTokens = tokenData as TokenData;
   const refreshedTokens = await refreshTokenWithLock(env, entry, oauthTokens, secret1, secret2, entry.service, ctx);
   return { headers: { Authorization: `Bearer ${refreshedTokens.access_token}` } };
+}
+
+/**
+ * Check if an error is a RefreshCooldownError and return a 503 response if so.
+ */
+function cooldownErrorResponse(err: unknown, requestId: string | number | null): Response | null {
+  if (err instanceof RefreshCooldownError) {
+    const resp = jsonRpcError(requestId, -32007, 'Token refresh temporarily unavailable — retrying automatically. Contact support@bindify.dev if this persists.', 503);
+    const headers = new Headers(resp.headers);
+    headers.set('Retry-After', '60');
+    return new Response(resp.body, { status: 503, headers });
+  }
+  return null;
 }
 
 function applyQueryParams(url: string, params?: Record<string, string>): string {
@@ -542,6 +587,9 @@ export async function handleProxySSE(request: Request, env: Env, ctx?: Execution
       const tokenData = await decryptCacheTokens(entry, params.secret2, getManagedEncryptionKeys(env));
       auth = await buildAuthFromCache(entry, tokenData, params.service, env, params.secret1, params.secret2, ctx ?? null);
     } catch (err) {
+      if (err instanceof RefreshCooldownError) {
+        return { error: Response.json({ error: 'temporarily_unavailable', message: 'Token refresh temporarily unavailable' }, { status: 503, headers: { 'Retry-After': '60' } }) };
+      }
       handleAuthError(err, { id: entry.connectionId, service: entry.service } as any, params.service, params.secret1.slice(0, 8), ctx, env);
       return { error: new Response('Unauthorized — please re-authenticate', { status: 401 }) };
     }
@@ -732,6 +780,8 @@ export async function handleProxyMessages(request: Request, env: Env, ctx?: Exec
       const tokenData = await decryptCacheTokens(entry, params.secret2, getManagedEncryptionKeys(env));
       auth = await buildAuthFromCache(entry, tokenData, params.service, env, params.secret1, params.secret2, ctx ?? null);
     } catch (err) {
+      const cooldownResp = cooldownErrorResponse(err, requestId);
+      if (cooldownResp) return { error: cooldownResp };
       handleAuthError(err, { id: entry.connectionId, service: entry.service } as any, params.service, params.secret1.slice(0, 8), ctx, env);
       return { error: jsonRpcError(requestId, -32005, 'Unauthorized — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 401) };
     }
@@ -878,6 +928,8 @@ export async function handleProxyStreamableHTTP(request: Request, env: Env, ctx?
       const tokenData = await decryptCacheTokens(entry, params.secret2, getManagedEncryptionKeys(env));
       auth = await buildAuthFromCache(entry, tokenData, params.service, env, params.secret1, params.secret2, ctx ?? null);
     } catch (err) {
+      const cooldownResp = cooldownErrorResponse(err, requestId);
+      if (cooldownResp) return { error: cooldownResp };
       handleAuthError(err, { id: entry.connectionId, service: entry.service } as any, params.service, params.secret1.slice(0, 8), ctx, env);
       return { error: jsonRpcError(requestId, -32005, 'Unauthorized — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 401) };
     }

@@ -16,6 +16,11 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DB.prepare('DELETE FROM refresh_locks').run();
+  // Clean up any cooldown keys from previous tests
+  const listed = await env.KV.list({ prefix: 'refresh_cooldown:' });
+  for (const key of listed.keys) {
+    await env.KV.delete(key.name);
+  }
 });
 
 describe('acquireRefreshLock', () => {
@@ -63,5 +68,24 @@ describe('cleanupExpiredRefreshLocks', () => {
 
     const remaining = await env.DB.prepare('SELECT COUNT(*) as count FROM refresh_locks').first<{ count: number }>();
     expect(remaining?.count).toBe(1);
+  });
+});
+
+describe('refresh cool-down KV key', () => {
+  it('can write and read a cool-down key', async () => {
+    const key = 'refresh_cooldown:conn-test';
+    await env.KV.put(key, new Date().toISOString(), { expirationTtl: 60 });
+
+    const value = await env.KV.get(key);
+    expect(value).not.toBeNull();
+  });
+
+  it('cool-down key can be deleted', async () => {
+    const key = 'refresh_cooldown:conn-test';
+    await env.KV.put(key, new Date().toISOString(), { expirationTtl: 60 });
+    await env.KV.delete(key);
+
+    const value = await env.KV.get(key);
+    expect(value).toBeNull();
   });
 });
