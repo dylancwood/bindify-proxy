@@ -3,7 +3,7 @@ import type { ServiceId, TokenData, Connection } from '@bindify/types';
 import { getService } from '../services/registry';
 import { checkCanConnect } from '../auth/entitlements';
 import { createConnection, updateConnectionLastRefreshed, getConnectionsByUserId, getConnectionById, deleteConnection, getUserById, getSubscriptionsByUserId, updateConnectionStatus, setSuspendedAt } from '../db/queries';
-import { generateRandomString, generateCodeChallenge, generateSecretBytes, encodeCredentials, encodeSecret1, base64UrlEncode, encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, getActiveKeyVersion } from '../crypto';
+import { generateRandomString, generateCodeChallenge, generateSecretBytes, encodeCredentials, encodeSecret1, base64UrlEncode, encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, getActiveKeyVersion, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
 import { getManagedEncryptionKeys } from '../index';
 import { validateUpstreamApiKey } from './validate-api-key';
 import { fetchMcpToolsList, validateApplicationTools } from './validate-application';
@@ -223,7 +223,7 @@ export async function handleCallback(
         refresh_token: tokenData.refresh_token ?? '',
         expires_at: tokenData.expires_in
           ? Math.floor(Date.now() / 1000) + tokenData.expires_in
-          : Math.floor(Date.now() / 1000) + 315360000, // 10 years if no expiry
+          : Math.floor(Date.now() / 1000) + PERMANENT_TOKEN_EXPIRY_SECONDS,
       };
 
   // Generate dual secrets — secret2 is NEVER stored (zero-knowledge)

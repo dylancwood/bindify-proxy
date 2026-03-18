@@ -1,7 +1,7 @@
 import type { Env } from './index';
 import type { Connection, TokenData } from '@bindify/types';
 import { getStaleConnections, updateConnectionLastRefreshed, updateConnectionStatus, setNeedsReauthAt, clearNeedsReauthAt, cleanupExpiredRefreshLocks } from './db/queries';
-import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, getManagedKey, getActiveKeyVersion } from './crypto';
+import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, getManagedKey, getActiveKeyVersion, PERMANENT_TOKEN_EXPIRY_SECONDS } from './crypto';
 import { getManagedEncryptionKeys } from './index';
 import { getService } from './services/registry';
 import { getDCRClientId, checkDCRRegistrationDirect } from './services/dcr';
@@ -169,7 +169,7 @@ export async function refreshManagedConnection(connection: Connection, env: Env)
           refresh_token: data.refresh_token ?? tokens.refresh_token,
           expires_at: data.expires_in
             ? Math.floor(Date.now() / 1000) + data.expires_in
-            : Math.floor(Date.now() / 1000) + 315360000,
+            : Math.floor(Date.now() / 1000) + PERMANENT_TOKEN_EXPIRY_SECONDS,
         };
 
     const preWriteValidation = validateTokensBeforeWrite(tokens, updated);

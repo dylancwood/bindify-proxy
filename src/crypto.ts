@@ -1,5 +1,8 @@
 // src/crypto.ts
 
+/** 10 years in seconds — used as expiry for tokens that don't expire */
+export const PERMANENT_TOKEN_EXPIRY_SECONDS = 315_360_000;
+
 export function generateRandomString(length: number): string {
   const array = new Uint8Array(length);
   crypto.getRandomValues(array);

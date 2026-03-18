@@ -24,7 +24,8 @@ import { log } from './logger';
 import { parseAllowlist, isAllowlisted } from './bot-detection/allowlist';
 import { BlocklistCache } from './bot-detection/blocklist-cache';
 import { log404Event } from './bot-detection/log-404';
-import { parseManagedKeys, type ManagedKeyEntry } from './crypto';
+import { parseManagedKeys } from './crypto';
+import type { ManagedKeyEntry } from './crypto';
 import { sendNewUserNotification } from './notifications';
 
 declare const BUILD_VERSION: string;
