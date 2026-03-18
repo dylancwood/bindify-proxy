@@ -1,0 +1,6 @@
+This directory is a git submodule pointing to https://github.com/dylancwood/bindify-proxy.
+
+Changes here must be committed and pushed in the bindify-proxy repo first,
+then the submodule reference bumped in the parent monorepo.
+
+See AGENT.md in this directory or in the monorepo root for the full workflow.

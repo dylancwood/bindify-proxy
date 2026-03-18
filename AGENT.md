@@ -8,14 +8,14 @@ The **admin UI, marketing site, and shared types** live in a separate private mo
 
 **This repo does NOT deploy directly.** CI only runs tests. All deployments go through the monorepo.
 
-This repo is referenced as a **git submodule** at `packages/worker` in the monorepo. To deploy changes:
+This repo is referenced as a **git submodule** at `packages/worker-submodule` in the monorepo. To deploy changes:
 
 1. Push your changes to `main` in this repo (tests run automatically)
 2. In the monorepo (`~/Documents/github/bindify`):
    ```bash
-   cd packages/worker && git pull origin main && cd ../..
-   git add packages/worker
-   git commit -m "chore: bump worker to $(git -C packages/worker rev-parse --short HEAD)"
+   cd packages/worker-submodule && git pull origin main && cd ../..
+   git add packages/worker-submodule
+   git commit -m "chore: bump worker to $(git -C packages/worker-submodule rev-parse --short HEAD)"
    git push
    ```
 3. This triggers the monorepo's staging deploy (runs migrations, deploys worker, deploys all other packages in correct order)
