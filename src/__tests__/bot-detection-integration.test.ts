@@ -115,9 +115,8 @@ describe('Bot detection integration', () => {
         .first<{ raw_url: string; url_segment: string; secret_segment: string }>();
 
       expect(row).not.toBeNull();
-      // raw_url should have credentials redacted
-      expect(row!.raw_url).not.toContain(creds.credentials);
-      expect(row!.raw_url).toMatch(/\/mcp\/linear\/\[redacted-[a-f0-9]{6}\]/);
+      // raw_url stored unredacted — 404 means credentials don't map to a real connection
+      expect(row!.raw_url).toBe(`http://localhost/mcp/linear/${creds.credentials}`);
       expect(row!.url_segment).toBe(`linear/${creds.credentials}`);
       expect(row!.secret_segment).toBe(creds.credentials);
     });
