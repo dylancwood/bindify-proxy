@@ -21,6 +21,7 @@ export async function handleCreateCheckout(
       'line_items[0][adjustable_quantity][minimum]': '1',
       'line_items[0][adjustable_quantity][maximum]': '20',
       client_reference_id: userId,
+      payment_method_collection: 'if_required',
       allow_promotion_codes: 'true',
       success_url: `${returnUrl}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: returnUrl,
@@ -138,7 +139,7 @@ export async function handleVerifyCheckout(
     return Response.json({ error: 'unauthorized', message: 'Session does not belong to this user' }, { status: 403 });
   }
 
-  if (session.payment_status !== 'paid') {
+  if (session.payment_status !== 'paid' && session.payment_status !== 'no_payment_required') {
     return Response.json({ error: 'not_paid', message: 'Checkout session has not been paid' }, { status: 400 });
   }
 

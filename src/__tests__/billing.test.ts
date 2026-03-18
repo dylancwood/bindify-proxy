@@ -126,6 +126,17 @@ describe('handleCreateCheckout', () => {
     expect(response.status).toBe(500);
   });
 
+  it('sets payment_method_collection to if_required', async () => {
+    mockStripeRequest.mockResolvedValue(
+      Response.json({ url: 'https://checkout.stripe.com/test' })
+    );
+
+    await handleCreateCheckout('user_1', 1, mockEnv, 'https://app.bindify.dev/dashboard');
+
+    const [, , options] = mockStripeRequest.mock.calls[0];
+    expect(options!.body!.payment_method_collection).toBe('if_required');
+  });
+
   it('enables adjustable quantity with min 1 and max 20', async () => {
     mockStripeRequest.mockResolvedValue(
       Response.json({ url: 'https://checkout.stripe.com/test' })
@@ -345,6 +356,33 @@ describe('handleVerifyCheckout', () => {
     expect(response.status).toBe(200);
     expect(body.already_linked).toBe(true);
     expect(mockSetStripeCustomerId).not.toHaveBeenCalled();
+  });
+
+  it('accepts no_payment_required status (100% coupon)', async () => {
+    mockStripeRequest.mockResolvedValueOnce(
+      Response.json({
+        client_reference_id: 'user_1',
+        customer: 'cus_abc',
+        subscription: 'sub_xyz',
+        payment_status: 'no_payment_required',
+      })
+    );
+    mockGetUserById.mockResolvedValue({ id: 'user_1', stripe_customer_id: null } as any);
+    mockStripeRequest.mockResolvedValueOnce(
+      Response.json({
+        id: 'sub_xyz',
+        customer: 'cus_abc',
+        status: 'active',
+        items: { data: [{ id: 'si_1', quantity: 1 }] },
+      })
+    );
+    mockProcessWebhookEvent.mockResolvedValue(undefined);
+
+    const response = await handleVerifyCheckout('user_1', 'cs_test_123', mockEnv);
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
   });
 
   it('rejects session belonging to different user', async () => {
