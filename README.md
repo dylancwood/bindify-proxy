@@ -95,6 +95,15 @@ See [`.dev.vars.example`](.dev.vars.example) for the full list with descriptions
 | Email | `SMTP2GO_API_KEY`, `ADMIN_NOTIFICATION_EMAIL` | No |
 | Zoho Desk | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, etc. | No |
 
+## Deployment
+
+This repo does **not** deploy directly. It is referenced as a git submodule in the private [bindify monorepo](https://github.com/dylancwood/bindify), which orchestrates all deployments to ensure correct ordering (migrations before code, coordinated with admin UI and other services).
+
+CI in this repo runs tests only. To deploy changes:
+
+1. Push to `main` here (tests run)
+2. In the monorepo, bump the submodule and push — this triggers the full deployment pipeline
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
