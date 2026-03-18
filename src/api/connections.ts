@@ -603,7 +603,8 @@ export async function handleApiKeyConnect(
     await createConnection(env.DB, {
       id: connectionId,
       user_id: userId,
-      service: serviceId as any,
+      // ServiceId may move to DB-driven definitions in the future, at which point the union type should be replaced with runtime validation only
+      service: serviceId as ServiceId,
       secret_url_segment_1: secret1,
       status: 'active',
       key_storage_mode: 'zero_knowledge',
@@ -635,7 +636,7 @@ export async function handleApiKeyConnect(
       const cacheConnection: Connection = {
         id: connectionId,
         user_id: userId,
-        service: serviceId as any,
+        service: serviceId as ServiceId,
         secret_url_segment_1: secret1,
         status: 'active',
         key_storage_mode: 'zero_knowledge',

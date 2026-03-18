@@ -31,9 +31,14 @@ export async function verifyWebhookSignature(
   );
   const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(signedPayload));
   const expected = Array.from(new Uint8Array(mac)).map(b => b.toString(16).padStart(2, '0')).join('');
-  if (sig.length !== expected.length) return false;
   const encoder = new TextEncoder();
   const sigBytes = encoder.encode(sig);
   const expectedBytes = encoder.encode(expected);
-  return crypto.subtle.timingSafeEqual(sigBytes, expectedBytes);
+  const maxLen = Math.max(sigBytes.length, expectedBytes.length);
+  const paddedSig = new Uint8Array(maxLen);
+  const paddedExpected = new Uint8Array(maxLen);
+  paddedSig.set(sigBytes);
+  paddedExpected.set(expectedBytes);
+  const equal = crypto.subtle.timingSafeEqual(paddedSig, paddedExpected);
+  return equal && sigBytes.length === expectedBytes.length;
 }
