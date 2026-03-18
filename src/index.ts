@@ -8,6 +8,7 @@ import { handleListServices } from './api/services-api';
 import { handleProxySSE, handleProxyMessages, handleProxyStreamableHTTP } from './proxy/handler';
 import { jsonRpcError } from './proxy/errors';
 import { getService } from './services/registry';
+import type { ServiceId } from '@bindify/types';
 import { isHealthCheckRequest, healthCheckResponse } from './proxy/healthcheck';
 import { verifyClerkToken, extractBearerToken, decodeJwtPayload, deriveJwksUrl } from './auth/clerk';
 import { ensureUser, MaxUsersReachedError } from './auth/middleware';
@@ -458,10 +459,17 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
       const authorizeMatch = path.match(/^\/api\/connections\/([^/]+)\/authorize$/);
       if (authorizeMatch && method === 'POST') {
         const serviceId = authorizeMatch[1];
+        // ServiceId may move to DB-driven definitions in the future, at which point the union type should be replaced with runtime validation only
+        if (!getService(serviceId)) {
+          return addCorsHeaders(
+            Response.json({ error: 'not_found', message: `Unknown service: ${serviceId}` }, { status: 404 }),
+            env, request
+          );
+        }
         const callbackUrl = `${baseUrl}/api/connections/callback`;
         const body = await request.json().catch(() => ({})) as { keyStorageMode?: 'managed' | 'zero_knowledge'; replaceConnectionId?: string };
         const keyStorageMode = body.keyStorageMode === 'managed' ? 'managed' : 'zero_knowledge';
-        const response = await handleAuthorize(userId, serviceId as any, env, callbackUrl, keyStorageMode, body.replaceConnectionId);
+        const response = await handleAuthorize(userId, serviceId as ServiceId, env, callbackUrl, keyStorageMode, body.replaceConnectionId);
         return addCorsHeaders(response, env, request);
       }
 
