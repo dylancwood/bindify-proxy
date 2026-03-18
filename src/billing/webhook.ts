@@ -72,8 +72,8 @@ async function updateUserCacheEntries(
   accessUntil?: string | null
 ): Promise<void> {
   const connections = await getConnectionsByUserId(env.DB, userId);
-  for (const conn of connections) {
-    await withProxyCache(env, conn.secret_url_segment_1, null, async (entry, write) => {
+  await Promise.all(connections.map(conn =>
+    withProxyCache(env, conn.secret_url_segment_1, null, async (entry, write) => {
       if (subscriptionStatus !== undefined) {
         entry.subscriptionStatus = subscriptionStatus;
         entry.subscriptionPastDueSince = pastDueSince;
@@ -86,8 +86,8 @@ async function updateUserCacheEntries(
       }
       entry.cachedAt = new Date().toISOString();
       await write();
-    });
-  }
+    })
+  ));
 }
 
 async function handleCheckoutCompleted(env: Env, session: Record<string, unknown>): Promise<void> {
