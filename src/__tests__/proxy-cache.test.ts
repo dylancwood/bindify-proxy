@@ -82,6 +82,7 @@ describe('buildProxyCacheEntry', () => {
     auth_type: 'oauth',
     auth_mode: null,
     application: null,
+    label: null,
     dcr_registration: null,
     encrypted_tokens: null,
     key_version: 1,
@@ -89,6 +90,7 @@ describe('buildProxyCacheEntry', () => {
     suspended_at: null,
     last_used_at: null,
     last_refreshed_at: null,
+    metadata: null,
     created_at: '2026-03-01T00:00:00Z',
   };
 
@@ -98,6 +100,7 @@ describe('buildProxyCacheEntry', () => {
     plan: 'active',
     trial_ends_at: null,
     access_until: null,
+    email: null,
     created_at: '2026-03-01T00:00:00Z',
   };
 

@@ -113,6 +113,7 @@ function makeConnectionObj(overrides: Partial<Connection> & { id: string; secret
     last_used_at: null,
     last_refreshed_at: null,
     suspended_at: null,
+    metadata: null,
     created_at: '',
     ...overrides,
   };

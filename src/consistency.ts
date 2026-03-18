@@ -30,6 +30,7 @@ interface ConnectionRow {
   last_used_at: string | null;
   last_refreshed_at: string | null;
   suspended_at: string | null;
+  metadata: string | null;
   created_at: string;
   // User fields (from JOIN)
   plan: string;
@@ -93,6 +94,7 @@ function rowToConnection(row: ConnectionRow): Connection {
     last_used_at: row.last_used_at,
     last_refreshed_at: row.last_refreshed_at,
     suspended_at: row.suspended_at,
+    metadata: row.metadata,
     created_at: row.created_at,
   };
 }

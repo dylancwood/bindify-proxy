@@ -37,7 +37,7 @@ export async function getConnectionBySecret1(
     .first<Connection>();
 }
 
-export async function createConnection(db: D1Database, connection: Omit<Connection, 'created_at' | 'last_used_at' | 'last_refreshed_at' | 'suspended_at' | 'auth_mode' | 'application' | 'label' | 'encrypted_tokens' | 'key_version'> & { auth_mode?: string | null; application?: string | null; label?: string | null; encrypted_tokens?: string | null; key_version?: number; metadata?: string | null }): Promise<void> {
+export async function createConnection(db: D1Database, connection: Omit<Connection, 'created_at' | 'last_used_at' | 'last_refreshed_at' | 'suspended_at' | 'metadata' | 'auth_mode' | 'application' | 'label' | 'encrypted_tokens' | 'key_version'> & { auth_mode?: string | null; application?: string | null; label?: string | null; encrypted_tokens?: string | null; key_version?: number; metadata?: string | null }): Promise<void> {
   await db
     .prepare(
       `INSERT INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, auth_type, auth_mode, application, label, dcr_registration, encrypted_tokens, needs_reauth_at, key_version, metadata)

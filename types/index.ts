@@ -26,6 +26,7 @@ export interface Connection {
   suspended_at: string | null;
   last_used_at: string | null;
   last_refreshed_at: string | null;
+  metadata: string | null;
   created_at: string;
 }
 
