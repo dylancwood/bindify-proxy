@@ -155,11 +155,18 @@ async function hashIp(ip: string): Promise<string> {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Logs 404 events for /mcp/ paths, but ONLY when the 404 originates from our
+ * own "connection not found" logic (not from an upstream server returning 404).
+ * We detect this via the X-Bindify-Not-Found header set by our error functions.
+ * This is safe to log with full credentials because 404 means the credentials
+ * don't correspond to any real connection — needed for enumeration detection.
+ */
 function maybeLog404(
   response: Response, path: string, ip: string,
   request: Request, ctx: ExecutionContext, env: Env
 ): Response {
-  if (response.status === 404 && path.startsWith('/mcp/')) {
+  if (response.status === 404 && path.startsWith('/mcp/') && response.headers.get('X-Bindify-Not-Found') === '1') {
     const urlSegment = path.replace(/^\/mcp\//, '');
     ctx.waitUntil(log404Event(env.DB, {
       ip, rawUrl: request.url, urlSegment, headers: request.headers, cf: (request as any).cf,

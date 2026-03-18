@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
-import { log404Event, filterHeaders, extractSecretSegment, redactCredentialsFromUrl } from '../bot-detection/log-404';
+import { log404Event, filterHeaders, extractSecretSegment } from '../bot-detection/log-404';
 
 const VALID_CREDS = 'A'.repeat(86);
 const SHORT_CREDS = 'A'.repeat(40);
@@ -95,35 +95,6 @@ describe('extractSecretSegment', () => {
   });
 });
 
-describe('redactCredentialsFromUrl', () => {
-  it('redacts 86-char credentials from URL', async () => {
-    const url = `https://api.bindify.dev/mcp/linear/${VALID_CREDS}/sse`;
-    const result = await redactCredentialsFromUrl(url);
-    expect(result).not.toContain(VALID_CREDS);
-    expect(result).toMatch(/\/mcp\/linear\/\[redacted-[a-f0-9]{6}\]\/sse/);
-  });
-
-  it('redacts credentials from streamable HTTP URL', async () => {
-    const url = `https://api.bindify.dev/mcp/linear/${VALID_CREDS}`;
-    const result = await redactCredentialsFromUrl(url);
-    expect(result).not.toContain(VALID_CREDS);
-    expect(result).toMatch(/\/mcp\/linear\/\[redacted-[a-f0-9]{6}\]/);
-  });
-
-  it('returns URL unchanged if no credentials present', async () => {
-    const url = 'https://api.bindify.dev/mcp/linear/short';
-    const result = await redactCredentialsFromUrl(url);
-    expect(result).toBe(url);
-  });
-
-  it('produces deterministic hash for same credentials', async () => {
-    const url = `https://api.bindify.dev/mcp/linear/${VALID_CREDS}`;
-    const result1 = await redactCredentialsFromUrl(url);
-    const result2 = await redactCredentialsFromUrl(url);
-    expect(result1).toBe(result2);
-  });
-});
-
 describe('log404Event', () => {
   it('inserts a row into proxy_404_log', async () => {
     await log404Event(env.DB, {
@@ -153,10 +124,11 @@ describe('log404Event', () => {
     expect(headers).not.toHaveProperty('authorization');
   });
 
-  it('redacts credentials from raw_url in DB', async () => {
+  it('stores full raw_url including credentials for enumeration detection', async () => {
+    const rawUrl = `http://api.bindify.dev/mcp/linear/${VALID_CREDS}/sse`;
     await log404Event(env.DB, {
       ip: '10.0.0.1',
-      rawUrl: `http://api.bindify.dev/mcp/linear/${VALID_CREDS}/sse`,
+      rawUrl,
       urlSegment: `linear/${VALID_CREDS}/sse`,
       headers: new Headers(),
       cf: undefined,
@@ -167,8 +139,7 @@ describe('log404Event', () => {
       .first();
 
     expect(row).not.toBeNull();
-    expect(row!.raw_url).not.toContain(VALID_CREDS);
-    expect(row!.raw_url).toMatch(/\[redacted-[a-f0-9]{6}\]/);
+    expect(row!.raw_url).toBe(rawUrl);
   });
 
   it('handles undefined request.cf gracefully', async () => {
