@@ -5,7 +5,7 @@ import { getService } from '../services/registry';
 import { updateConnectionLastUsed, updateConnectionStatus, setSuspendedAt, clearNeedsReauthAt, setNeedsReauthAt, getUserById, getSubscriptionsByUserId, acquireRefreshLock } from '../db/queries';
 import { isHealthCheckRequest, healthCheckResponse } from './healthcheck';
 import { jsonRpcError, extractRequestId } from './errors';
-import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, decodeCredentials, getManagedKey, getActiveKeyVersion } from '../crypto';
+import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, decodeCredentials, getManagedKey, getActiveKeyVersion, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
 import { getDCRClientId } from '../services/dcr';
 import { getCallbackUrl } from '../utils/url';
 import { log } from '../logger';
@@ -291,7 +291,7 @@ async function performTokenRefresh(
         refresh_token: data.refresh_token ?? tokens.refresh_token,
         expires_at: data.expires_in
           ? Math.floor(Date.now() / 1000) + data.expires_in
-          : Math.floor(Date.now() / 1000) + 315360000,
+          : Math.floor(Date.now() / 1000) + PERMANENT_TOKEN_EXPIRY_SECONDS,
       };
 
   // Layer 2: validate final TokenData before encryption
@@ -514,19 +514,6 @@ async function buildAuthFromCache(
   return { headers: { Authorization: `Bearer ${refreshedTokens.access_token}` } };
 }
 
-/**
- * Check if an error is a RefreshCooldownError and return a 503 response if so.
- */
-function cooldownErrorResponse(err: unknown, requestId: string | number | null): Response | null {
-  if (err instanceof RefreshCooldownError) {
-    const resp = jsonRpcError(requestId, -32007, 'Token refresh temporarily unavailable — retrying automatically. Contact support@bindify.dev if this persists.', 503);
-    const headers = new Headers(resp.headers);
-    headers.set('Retry-After', '60');
-    return new Response(resp.body, { status: 503, headers });
-  }
-  return null;
-}
-
 function applyQueryParams(url: string, params?: Record<string, string>): string {
   if (!params) return url;
   const parsed = new URL(url);
@@ -536,27 +523,33 @@ function applyQueryParams(url: string, params?: Record<string, string>): string 
   return parsed.toString();
 }
 
-export async function handleProxySSE(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
-  const params = parseProxyPath(request);
-  if (!params) return new Response('Invalid proxy path', { status: 400 });
+type ProxyErrorType = 'not_found' | 'suspended' | 'error' | 'access_denied' | 'unauthorized' | 'cooldown';
+type ProxyErrorFn = (type: ProxyErrorType) => Response;
 
-  const serviceDef = getService(params.service);
-  if (!serviceDef) return new Response('Unknown service', { status: 404 });
-
+/**
+ * Shared proxy auth resolution: cache lookup, service mismatch check, billing check,
+ * rate limit, stale-while-revalidate, and auth building.
+ */
+async function resolveProxyAuth(
+  env: Env,
+  params: ProxyParams,
+  ctx: ExecutionContext | null,
+  makeError: ProxyErrorFn
+): Promise<{ auth: AuthResult; entry: ProxyCacheEntry } | Response> {
   const config = parseConfig(env.CONFIG);
 
-  const cacheResult = await withProxyCache<CacheResult>(env, params.secret1, ctx ?? null, async (entry, write): Promise<CacheResult> => {
+  const cacheResult = await withProxyCache<CacheResult>(env, params.secret1, ctx, async (entry, write): Promise<CacheResult> => {
     // Service mismatch check — prevent credential leaks to wrong upstream
     if (entry.service !== params.service) {
-      return { error: new Response('Connection not found', { status: 404 }) };
+      return { error: makeError('not_found') };
     }
 
     // Connection status check
     if (entry.status === 'suspended') {
-      return { error: new Response('Connection suspended — payment required', { status: 402 }) };
+      return { error: makeError('suspended') };
     }
     if (entry.status === 'error') {
-      return { error: new Response('Connection error — please re-authenticate', { status: 502 }) };
+      return { error: makeError('error') };
     }
 
     // KV-based hourly rate limit (staging only)
@@ -572,7 +565,7 @@ export async function handleProxySSE(request: Request, env: Env, ctx?: Execution
         await updateConnectionStatus(env.DB, entry.connectionId, 'suspended');
         await setSuspendedAt(env.DB, entry.connectionId, new Date().toISOString());
       }
-      return { error: new Response('Access denied', { status: 403 }) };
+      return { error: makeError('access_denied') };
     }
 
     // Stale-while-revalidate
@@ -585,22 +578,88 @@ export async function handleProxySSE(request: Request, env: Env, ctx?: Execution
     let auth: AuthResult;
     try {
       const tokenData = await decryptCacheTokens(entry, params.secret2, getManagedEncryptionKeys(env));
-      auth = await buildAuthFromCache(entry, tokenData, params.service, env, params.secret1, params.secret2, ctx ?? null);
+      auth = await buildAuthFromCache(entry, tokenData, params.service, env, params.secret1, params.secret2, ctx);
     } catch (err) {
       if (err instanceof RefreshCooldownError) {
-        return { error: Response.json({ error: 'temporarily_unavailable', message: 'Token refresh temporarily unavailable' }, { status: 503, headers: { 'Retry-After': '60' } }) };
+        return { error: makeError('cooldown') };
       }
-      handleAuthError(err, { id: entry.connectionId, service: entry.service } as any, params.service, params.secret1.slice(0, 8), ctx, env);
-      return { error: new Response('Unauthorized — please re-authenticate', { status: 401 }) };
+      handleAuthError(err, { id: entry.connectionId, service: entry.service } as any, params.service, params.secret1.slice(0, 8), ctx ?? undefined, env);
+      return { error: makeError('unauthorized') };
     }
 
     return { auth, entry };
   });
 
-  if (!cacheResult) return new Response('Connection not found', { status: 404 });
+  if (!cacheResult) return makeError('not_found');
   if ('error' in cacheResult) return cacheResult.error;
 
-  const { auth, entry } = cacheResult;
+  return cacheResult;
+}
+
+/**
+ * Shared post-proxy background tasks: update last_used_at and clear needsReauthAt.
+ */
+function schedulePostProxyTasks(
+  env: Env,
+  entry: ProxyCacheEntry,
+  params: ProxyParams,
+  ctx: ExecutionContext | undefined
+): void {
+  const lastUsedPromise = updateConnectionLastUsed(env.DB, entry.connectionId).catch(() => {});
+  if (ctx) {
+    ctx.waitUntil(lastUsedPromise);
+    if (entry.needsReauthAt) {
+      ctx.waitUntil((async () => {
+        await clearNeedsReauthAt(env.DB, entry.connectionId);
+        await withProxyCache(env, params.secret1, null, async (e, write) => {
+          e.needsReauthAt = null;
+          await write();
+        });
+      })().catch(() => {}));
+    }
+  }
+}
+
+function sseErrorFn(type: ProxyErrorType): Response {
+  switch (type) {
+    case 'not_found': return new Response('Connection not found', { status: 404 });
+    case 'suspended': return new Response('Connection suspended — payment required', { status: 402 });
+    case 'error': return new Response('Connection error — please re-authenticate', { status: 502 });
+    case 'access_denied': return new Response('Access denied', { status: 403 });
+    case 'cooldown': return Response.json({ error: 'temporarily_unavailable', message: 'Token refresh temporarily unavailable' }, { status: 503, headers: { 'Retry-After': '60' } });
+    case 'unauthorized': return new Response('Unauthorized — please re-authenticate', { status: 401 });
+  }
+}
+
+function jsonRpcErrorFn(requestId: string | number | null): ProxyErrorFn {
+  return (type: ProxyErrorType): Response => {
+    switch (type) {
+      case 'not_found': return jsonRpcError(requestId, -32001, 'Connection not found — this URL may have been deactivated. Reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 404);
+      case 'suspended': return jsonRpcError(requestId, -32002, 'Connection suspended — payment required. Update billing at app.bindify.dev. Contact support@bindify.dev if you need help.', 402);
+      case 'error': return jsonRpcError(requestId, -32003, 'Connection error — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 502);
+      case 'access_denied': return jsonRpcError(requestId, -32004, 'Access denied — update your plan at app.bindify.dev. Contact support@bindify.dev if you need help.', 403);
+      case 'cooldown': {
+        const resp = jsonRpcError(requestId, -32007, 'Token refresh temporarily unavailable — retrying automatically. Contact support@bindify.dev if this persists.', 503);
+        const headers = new Headers(resp.headers);
+        headers.set('Retry-After', '60');
+        return new Response(resp.body, { status: 503, headers });
+      }
+      case 'unauthorized': return jsonRpcError(requestId, -32005, 'Unauthorized — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 401);
+    }
+  };
+}
+
+export async function handleProxySSE(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
+  const params = parseProxyPath(request);
+  if (!params) return new Response('Invalid proxy path', { status: 400 });
+
+  const serviceDef = getService(params.service);
+  if (!serviceDef) return new Response('Unknown service', { status: 404 });
+
+  const result = await resolveProxyAuth(env, params, ctx ?? null, sseErrorFn);
+  if (result instanceof Response) return result;
+
+  const { auth, entry } = result;
 
   // Fire-and-forget proxy usage event
   if (ctx) {
@@ -693,20 +752,7 @@ export async function handleProxySSE(request: Request, env: Env, ctx?: Execution
 
   pump();
 
-  // Update last_used_at non-blocking via waitUntil
-  const sseLastUsedPromise = updateConnectionLastUsed(env.DB, entry.connectionId).catch(() => {});
-  if (ctx) {
-    ctx.waitUntil(sseLastUsedPromise);
-    if (entry.needsReauthAt) {
-      ctx.waitUntil((async () => {
-        await clearNeedsReauthAt(env.DB, entry.connectionId);
-        await withProxyCache(env, params.secret1, null, async (e, write) => {
-          e.needsReauthAt = null;
-          await write();
-        });
-      })().catch(() => {}));
-    }
-  }
+  schedulePostProxyTasks(env, entry, params, ctx);
 
   return new Response(readable, {
     headers: {
@@ -737,62 +783,10 @@ export async function handleProxyMessages(request: Request, env: Env, ctx?: Exec
 
   const requestId = extractRequestId(healthCheck.body);
 
-  const config = parseConfig(env.CONFIG);
+  const result = await resolveProxyAuth(env, params, ctx ?? null, jsonRpcErrorFn(requestId));
+  if (result instanceof Response) return result;
 
-  const cacheResult = await withProxyCache<CacheResult>(env, params.secret1, ctx ?? null, async (entry, write): Promise<CacheResult> => {
-    // Service mismatch check — prevent credential leaks to wrong upstream
-    if (entry.service !== params.service) {
-      return { error: jsonRpcError(requestId, -32001, 'Connection not found — this URL may have been deactivated. Reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 404) };
-    }
-
-    if (entry.status === 'suspended') {
-      return { error: jsonRpcError(requestId, -32002, 'Connection suspended — payment required. Update billing at app.bindify.dev. Contact support@bindify.dev if you need help.', 402) };
-    }
-    if (entry.status === 'error') {
-      return { error: jsonRpcError(requestId, -32003, 'Connection error — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 502) };
-    }
-
-    // KV-based hourly rate limit (staging only)
-    const kvRateLimitResponse = await checkProxyRateLimit(env, entry.connectionId, env.MCP_PROXY_RATE_LIMIT_PER_HOUR);
-    if (kvRateLimitResponse) return { error: kvRateLimitResponse };
-
-    // Billing check from cached snapshot
-    const access = checkCachedAccessActive(entry.user, entry.subscriptionStatus, entry.subscriptionPastDueSince);
-    if (!access.active) {
-      if (entry.status !== 'suspended') {
-        entry.status = 'suspended';
-        await write();
-        await updateConnectionStatus(env.DB, entry.connectionId, 'suspended');
-        await setSuspendedAt(env.DB, entry.connectionId, new Date().toISOString());
-      }
-      return { error: jsonRpcError(requestId, -32004, 'Access denied — update your plan at app.bindify.dev. Contact support@bindify.dev if you need help.', 403) };
-    }
-
-    // Stale-while-revalidate
-    const age = Date.now() - new Date(entry.cachedAt).getTime();
-    if (age > config.proxyCacheTtlSeconds * 1000 && ctx) {
-      ctx.waitUntil(refreshCacheMetadata(env, params.secret1));
-    }
-
-    // Decrypt tokens and build auth
-    let auth: AuthResult;
-    try {
-      const tokenData = await decryptCacheTokens(entry, params.secret2, getManagedEncryptionKeys(env));
-      auth = await buildAuthFromCache(entry, tokenData, params.service, env, params.secret1, params.secret2, ctx ?? null);
-    } catch (err) {
-      const cooldownResp = cooldownErrorResponse(err, requestId);
-      if (cooldownResp) return { error: cooldownResp };
-      handleAuthError(err, { id: entry.connectionId, service: entry.service } as any, params.service, params.secret1.slice(0, 8), ctx, env);
-      return { error: jsonRpcError(requestId, -32005, 'Unauthorized — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 401) };
-    }
-
-    return { auth, entry };
-  });
-
-  if (!cacheResult) return jsonRpcError(requestId, -32001, 'Connection not found — this URL may have been deactivated. Reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 404);
-  if ('error' in cacheResult) return cacheResult.error;
-
-  const { auth, entry } = cacheResult;
+  const { auth, entry } = result;
 
   if (ctx) {
     ctx.waitUntil(
@@ -825,20 +819,7 @@ export async function handleProxyMessages(request: Request, env: Env, ctx?: Exec
     body,
   });
 
-  // Update last_used_at non-blocking via waitUntil
-  const msgLastUsedPromise = updateConnectionLastUsed(env.DB, entry.connectionId).catch(() => {});
-  if (ctx) {
-    ctx.waitUntil(msgLastUsedPromise);
-    if (entry.needsReauthAt) {
-      ctx.waitUntil((async () => {
-        await clearNeedsReauthAt(env.DB, entry.connectionId);
-        await withProxyCache(env, params.secret1, null, async (e, write) => {
-          e.needsReauthAt = null;
-          await write();
-        });
-      })().catch(() => {}));
-    }
-  }
+  schedulePostProxyTasks(env, entry, params, ctx);
 
   if (upstreamResponse.status >= 400 && ctx) {
     ctx.waitUntil(
@@ -885,62 +866,10 @@ export async function handleProxyStreamableHTTP(request: Request, env: Env, ctx?
   // For GET requests, preReadBody is undefined → extractRequestId returns null
   const requestId = extractRequestId(preReadBody);
 
-  const config = parseConfig(env.CONFIG);
+  const result = await resolveProxyAuth(env, params, ctx ?? null, jsonRpcErrorFn(requestId));
+  if (result instanceof Response) return result;
 
-  const cacheResult = await withProxyCache<CacheResult>(env, params.secret1, ctx ?? null, async (entry, write): Promise<CacheResult> => {
-    // Service mismatch check — prevent credential leaks to wrong upstream
-    if (entry.service !== params.service) {
-      return { error: jsonRpcError(requestId, -32001, 'Connection not found — this URL may have been deactivated. Reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 404) };
-    }
-
-    if (entry.status === 'suspended') {
-      return { error: jsonRpcError(requestId, -32002, 'Connection suspended — payment required. Update billing at app.bindify.dev. Contact support@bindify.dev if you need help.', 402) };
-    }
-    if (entry.status === 'error') {
-      return { error: jsonRpcError(requestId, -32003, 'Connection error — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 502) };
-    }
-
-    // KV-based hourly rate limit (staging only)
-    const kvRateLimitResponse = await checkProxyRateLimit(env, entry.connectionId, env.MCP_PROXY_RATE_LIMIT_PER_HOUR);
-    if (kvRateLimitResponse) return { error: kvRateLimitResponse };
-
-    // Billing check from cached snapshot
-    const access = checkCachedAccessActive(entry.user, entry.subscriptionStatus, entry.subscriptionPastDueSince);
-    if (!access.active) {
-      if (entry.status !== 'suspended') {
-        entry.status = 'suspended';
-        await write();
-        await updateConnectionStatus(env.DB, entry.connectionId, 'suspended');
-        await setSuspendedAt(env.DB, entry.connectionId, new Date().toISOString());
-      }
-      return { error: jsonRpcError(requestId, -32004, 'Access denied — update your plan at app.bindify.dev. Contact support@bindify.dev if you need help.', 403) };
-    }
-
-    // Stale-while-revalidate
-    const age = Date.now() - new Date(entry.cachedAt).getTime();
-    if (age > config.proxyCacheTtlSeconds * 1000 && ctx) {
-      ctx.waitUntil(refreshCacheMetadata(env, params.secret1));
-    }
-
-    // Decrypt tokens and build auth
-    let auth: AuthResult;
-    try {
-      const tokenData = await decryptCacheTokens(entry, params.secret2, getManagedEncryptionKeys(env));
-      auth = await buildAuthFromCache(entry, tokenData, params.service, env, params.secret1, params.secret2, ctx ?? null);
-    } catch (err) {
-      const cooldownResp = cooldownErrorResponse(err, requestId);
-      if (cooldownResp) return { error: cooldownResp };
-      handleAuthError(err, { id: entry.connectionId, service: entry.service } as any, params.service, params.secret1.slice(0, 8), ctx, env);
-      return { error: jsonRpcError(requestId, -32005, 'Unauthorized — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 401) };
-    }
-
-    return { auth, entry };
-  });
-
-  if (!cacheResult) return jsonRpcError(requestId, -32001, 'Connection not found — this URL may have been deactivated. Reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 404);
-  if ('error' in cacheResult) return cacheResult.error;
-
-  const { auth, entry } = cacheResult;
+  const { auth, entry } = result;
 
   if (ctx) {
     ctx.waitUntil(
@@ -953,20 +882,7 @@ export async function handleProxyStreamableHTTP(request: Request, env: Env, ctx?
     );
   }
 
-  // Update last_used_at non-blocking
-  const lastUsedPromise = updateConnectionLastUsed(env.DB, entry.connectionId).catch(() => {});
-  if (ctx) {
-    ctx.waitUntil(lastUsedPromise);
-    if (entry.needsReauthAt) {
-      ctx.waitUntil((async () => {
-        await clearNeedsReauthAt(env.DB, entry.connectionId);
-        await withProxyCache(env, params.secret1, null, async (e, write) => {
-          e.needsReauthAt = null;
-          await write();
-        });
-      })().catch(() => {}));
-    }
-  }
+  schedulePostProxyTasks(env, entry, params, ctx);
 
   if (method === 'POST') {
     const body = preReadBody ?? await request.text();

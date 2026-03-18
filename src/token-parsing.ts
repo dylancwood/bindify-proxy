@@ -1,4 +1,5 @@
 import type { TokenData, ApiKeyData } from '@bindify/types';
+import { log } from './logger';
 
 /**
  * Defensively parses a token endpoint response body.
@@ -37,10 +38,11 @@ export function parseTokenResponseBody(
       // Sanity check: form-encoded should have at least access_token
       if (parsed.access_token) return parsed;
     } catch (formErr) {
-      // Re-throw OAuth errors from form-encoded parsing
       if (formErr instanceof Error && formErr.message.startsWith('OAuth error')) {
         throw formErr;
       }
+      // Log unexpected parsing errors but don't block — fall through to final throw
+      log.warn('Unexpected error parsing form-encoded response', { error: formErr instanceof Error ? formErr.message : String(formErr) });
     }
     throw new Error(`Unable to parse token response body (content-type: ${contentType})`);
   }

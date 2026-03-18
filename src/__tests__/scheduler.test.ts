@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import { acquireLock, releaseLock, keepaliveDCRRegistrations, refreshManagedConnection, keepaliveManagedConnection, refreshStaleConnections } from '../scheduler';
 import { createConnection } from '../db/queries';
-import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey } from '../crypto';
+import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -312,7 +312,7 @@ describe('keepaliveManagedConnection', () => {
     const tokens = JSON.stringify({
       access_token: 'todoist_access_token',
       refresh_token: '',
-      expires_at: Math.floor(Date.now() / 1000) + 315360000, // 10 years
+      expires_at: Math.floor(Date.now() / 1000) + PERMANENT_TOKEN_EXPIRY_SECONDS,
     });
     const encrypted = await encryptTokenDataWithKey(tokens, encryptionKey);
 
