@@ -72,6 +72,54 @@ describe('Bot detection integration', () => {
     });
   });
 
+  describe('blocklist + CORS preflight', () => {
+    it('returns 204 with CORS headers for OPTIONS from a blocked IP (allowed origin)', async () => {
+      await env.KV.put('blocked:2.2.2.2', 'scanner pattern');
+
+      const response = await SELF.fetch('http://localhost/api/connections', {
+        method: 'OPTIONS',
+        headers: {
+          'CF-Connecting-IP': '2.2.2.2',
+          'Origin': 'http://localhost:5173',
+        },
+      });
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173');
+      expect(response.headers.get('Access-Control-Allow-Methods')).toContain('GET');
+    });
+
+    it('returns 403 for OPTIONS from non-allowed origin (even when IP is blocked)', async () => {
+      await env.KV.put('blocked:2.2.2.3', 'scanner pattern');
+
+      // Origin check fires before blocklist — blocked IP gets 403 from CORS, not 429
+      const response = await SELF.fetch('http://localhost/api/connections', {
+        method: 'OPTIONS',
+        headers: {
+          'CF-Connecting-IP': '2.2.2.3',
+          'Origin': 'https://evil.example.com',
+        },
+      });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 429 with CORS headers for non-OPTIONS from a blocked IP', async () => {
+      await env.KV.put('blocked:2.2.2.4', 'scanner pattern');
+
+      const response = await SELF.fetch('http://localhost/api/connections', {
+        headers: {
+          'CF-Connecting-IP': '2.2.2.4',
+          'Origin': 'http://localhost:5173',
+        },
+      });
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get('Retry-After')).toBe('600');
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173');
+    });
+  });
+
   describe('allowlist bypass', () => {
     it('skips blocklist check for allowlisted IPs', async () => {
       await env.KV.put('blocked:10.0.0.1', 'scanner pattern');
