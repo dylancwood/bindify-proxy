@@ -134,13 +134,20 @@ export async function checkKvD1Consistency(env: Env): Promise<ConsistencyCheckRe
   const result: ConsistencyCheckResult = { checked: 0, rectified: 0, unrectifiable: 0 };
 
   // Query all active/suspended connections with user and subscription data
+  // CTE computes the latest subscription per user once, then joins — O(n+m) instead of O(n*m)
   const query = `
+    WITH latest_subs AS (
+      SELECT s1.user_id, s1.id, s1.status, s1.past_due_since
+      FROM subscriptions s1
+      WHERE s1.created_at = (
+        SELECT MAX(s2.created_at) FROM subscriptions s2 WHERE s2.user_id = s1.user_id
+      )
+    )
     SELECT c.*, u.plan, u.trial_ends_at, u.access_until,
            s.status AS subscription_status, s.past_due_since AS subscription_past_due_since
     FROM connections c
     JOIN users u ON c.user_id = u.id
-    LEFT JOIN subscriptions s ON c.user_id = s.user_id
-      AND s.id = (SELECT id FROM subscriptions WHERE user_id = c.user_id ORDER BY created_at DESC LIMIT 1)
+    LEFT JOIN latest_subs s ON c.user_id = s.user_id
     WHERE c.status IN ('active', 'suspended')
   `;
 
