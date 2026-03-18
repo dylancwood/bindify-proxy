@@ -190,23 +190,6 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     blocklistCache = new BlocklistCache(ttl);
   }
 
-  // Skip blocklist for allowlisted IPs
-  if (!isAllowlisted(allowlist, ip)) {
-    // Check in-memory cache first, then KV on miss
-    let blocked = blocklistCache.get(ip);
-    if (blocked === null) {
-      const kvResult = await env.KV.get(`blocked:${ip}`);
-      blocked = kvResult !== null;
-      blocklistCache.set(ip, blocked);
-    }
-    if (blocked) {
-      return Response.json(
-        { error: 'rate_limited', message: 'Too many requests' },
-        { status: 429, headers: { 'Retry-After': '600' } }
-      );
-    }
-  }
-
   // Handle CORS preflight
   if (method === 'OPTIONS') {
     // CSP report endpoint is public — allow any origin
@@ -227,6 +210,27 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
       return new Response(null, { status: 403 });
     }
     return new Response(null, { status: 204, headers: corsHeaders(env, request) });
+  }
+
+  // Skip blocklist for allowlisted IPs
+  if (!isAllowlisted(allowlist, ip)) {
+    // Check in-memory cache first, then KV on miss
+    let blocked = blocklistCache.get(ip);
+    if (blocked === null) {
+      const kvResult = await env.KV.get(`blocked:${ip}`);
+      blocked = kvResult !== null;
+      blocklistCache.set(ip, blocked);
+    }
+    if (blocked) {
+      return addCorsHeaders(
+        Response.json(
+          { error: 'rate_limited', message: 'Too many requests' },
+          { status: 429, headers: { 'Retry-After': '600' } }
+        ),
+        env,
+        request
+      );
+    }
   }
 
   try {
