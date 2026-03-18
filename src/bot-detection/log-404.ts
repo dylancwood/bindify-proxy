@@ -29,6 +29,22 @@ export function extractSecretSegment(path: string): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * Replaces the credentials portion of a raw URL with a short hash prefix for correlation.
+ * E.g. `https://api.bindify.dev/mcp/linear/ABCabc.../sse` → `https://api.bindify.dev/mcp/linear/[redacted-a1b2c3]/sse`
+ */
+export async function redactCredentialsFromUrl(rawUrl: string): Promise<string> {
+  const match = rawUrl.match(/\/mcp\/([^/]+)\/([A-Za-z0-9_-]{86})(\/|$)/);
+  if (!match) return rawUrl;
+
+  const creds = match[2];
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(creds));
+  const prefix = Array.from(new Uint8Array(hash).slice(0, 3))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  return rawUrl.replace(creds, `[redacted-${prefix}]`);
+}
+
 interface Log404Params {
   ip: string;
   rawUrl: string;
@@ -41,12 +57,13 @@ export async function log404Event(db: D1Database, params: Log404Params): Promise
   try {
     const filteredHeaders = filterHeaders(params.headers);
     const secretSegment = extractSecretSegment('/mcp/' + params.urlSegment);
+    const sanitizedUrl = await redactCredentialsFromUrl(params.rawUrl);
     await db.prepare(`
       INSERT INTO proxy_404_log (ip, raw_url, url_segment, secret_segment, headers, timestamp, asn, asn_org, country)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       params.ip,
-      params.rawUrl,
+      sanitizedUrl,
       params.urlSegment,
       secretSegment,
       JSON.stringify(filteredHeaders),

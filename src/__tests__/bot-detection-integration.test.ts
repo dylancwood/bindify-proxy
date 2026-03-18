@@ -39,6 +39,7 @@ beforeAll(async () => {
       last_used_at TEXT,
       last_refreshed_at TEXT,
       suspended_at TEXT,
+    metadata TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `).run();
@@ -114,7 +115,9 @@ describe('Bot detection integration', () => {
         .first<{ raw_url: string; url_segment: string; secret_segment: string }>();
 
       expect(row).not.toBeNull();
-      expect(row!.raw_url).toBe(`http://localhost/mcp/linear/${creds.credentials}`);
+      // raw_url should have credentials redacted
+      expect(row!.raw_url).not.toContain(creds.credentials);
+      expect(row!.raw_url).toMatch(/\/mcp\/linear\/\[redacted-[a-f0-9]{6}\]/);
       expect(row!.url_segment).toBe(`linear/${creds.credentials}`);
       expect(row!.secret_segment).toBe(creds.credentials);
     });

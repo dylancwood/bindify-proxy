@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS connections (
     last_used_at TEXT,
     last_refreshed_at TEXT,
     suspended_at TEXT,
+    metadata TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
