@@ -53,7 +53,9 @@ export async function handleCspReport(request: Request): Promise<Response> {
         'effective-directive': report['effective-directive'] ?? report['effectiveDirective'],
         'original-policy': report['original-policy'] ?? report['originalPolicy'],
       };
-      log.info('CSP violation report', { report: truncated, ip });
+      // If all fields are undefined, log the raw report for debugging
+      const hasData = Object.values(truncated).some(v => v !== undefined);
+      log.info('CSP violation report', { report: hasData ? truncated : report, ip });
     }
   } catch {
     log.info('CSP violation report (unparseable)', { ip });

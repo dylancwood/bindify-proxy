@@ -75,7 +75,7 @@ describe('CSP Report endpoint', () => {
       expect(response.headers.get('Access-Control-Allow-Origin')).toBe(env.ADMIN_URL);
     });
 
-    it('omits Access-Control-Allow-Origin for disallowed origin', async () => {
+    it('allows Access-Control-Allow-Origin for any origin (public endpoint)', async () => {
       const response = await SELF.fetch(CSP_REPORT_URL, {
         method: 'POST',
         headers: {
@@ -85,7 +85,7 @@ describe('CSP Report endpoint', () => {
         body: validCspReport,
       });
       expect(response.status).toBe(204);
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://evil.example.com');
     });
 
     it('rate-limits excessive reports from same IP (10/min via Cache API) → 429 on 11th', async () => {
@@ -107,6 +107,22 @@ describe('CSP Report endpoint', () => {
         body: validCspReport,
       });
       expect(response.status).toBe(204);
+    });
+  });
+
+  describe('OPTIONS preflight', () => {
+    it('allows CORS preflight from any origin → 204', async () => {
+      const response = await SELF.fetch(CSP_REPORT_URL, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': 'https://stg.bindify.dev',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'Content-Type',
+        },
+      });
+      expect(response.status).toBe(204);
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://stg.bindify.dev');
+      expect(response.headers.get('Access-Control-Allow-Methods')).toBe('POST');
     });
   });
 

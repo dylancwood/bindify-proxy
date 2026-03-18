@@ -209,6 +209,18 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
   // Handle CORS preflight
   if (method === 'OPTIONS') {
+    // CSP report endpoint is public — allow any origin
+    if (path === '/api/csp-report') {
+      const origin = request.headers.get('Origin') || '';
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': origin || '*',
+          'Access-Control-Allow-Methods': 'POST',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      });
+    }
     const origin = request.headers.get('Origin') || '';
     const allowed = getAllowedOrigins(env);
     if (origin && !allowed.includes(origin)) {
@@ -424,11 +436,14 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     // ─── CSP violation report (public, rate-limited) ───
     if (path === '/api/csp-report' && method === 'POST') {
       const response = await handleCspReport(request);
-      return addCorsHeaders(response, env, request);
+      const origin = request.headers.get('Origin') || '';
+      const headers = new Headers(response.headers);
+      headers.set('Access-Control-Allow-Origin', origin || '*');
+      return new Response(response.body, { status: response.status, headers });
     }
 
     if (path === '/api/csp-report' && method !== 'POST') {
-      return addCorsHeaders(new Response(null, { status: 405 }), env, request);
+      return new Response(null, { status: 405 });
     }
 
     // ─── Authenticated API routes (Clerk JWT) ───
