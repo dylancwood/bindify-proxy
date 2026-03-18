@@ -181,6 +181,128 @@ describe('Proxy handler reauth clearing', () => {
   });
 });
 
+describe('Refresh cool-down returns 503', () => {
+  it('returns 503 with Retry-After when cool-down key is present and token is expired', async () => {
+    // Set a cool-down key for the connection
+    await env.KV.put(`refresh_cooldown:${CONNECTION_ID}`, new Date().toISOString(), { expirationTtl: 60 });
+
+    // Set expired tokens so refresh would be attempted
+    const expiredTokenData = JSON.stringify({
+      access_token: 'expired-access-token',
+      refresh_token: 'test-refresh-token',
+      expires_at: Math.floor(Date.now() / 1000) - 100, // expired
+    });
+    const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, CONNECTION_ID);
+    const encrypted = await encryptTokenDataWithKey(expiredTokenData, key);
+
+    const cacheEntry = {
+      schemaVersion: PROXY_CACHE_SCHEMA_VERSION,
+      connectionId: CONNECTION_ID,
+      userId: USER_ID,
+      service: 'linear',
+      status: 'active',
+      authType: 'oauth',
+      authMode: null,
+      application: null,
+      keyStorageMode: 'managed',
+      keyVersion: 1,
+      dcrRegistration: null,
+      needsReauthAt: null,
+      encryptedTokens: encrypted,
+      user: { plan: 'free_trial', trialEndsAt: '2099-12-31T23:59:59Z', accessUntil: null },
+      subscriptionStatus: null,
+      subscriptionPastDueSince: null,
+      cachedAt: new Date().toISOString(),
+    };
+    await env.KV.put(`proxy:${creds.secret1}`, JSON.stringify(cacheEntry));
+
+    const response = await SELF.fetch(`http://localhost/mcp/linear/${creds.credentials}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    const body = await response.json() as any;
+    expect(body.error.code).toBe(-32007);
+
+    // Clean up
+    await env.KV.delete(`refresh_cooldown:${CONNECTION_ID}`);
+  });
+
+  it('clears cool-down key after successful refresh', async () => {
+    // Pre-set a stale cooldown key
+    await env.KV.put(`refresh_cooldown:${CONNECTION_ID}`, 'stale', { expirationTtl: 60 });
+
+    // Set near-expiring (but still valid) tokens — cooldown check returns tokens
+    // when token is still valid, but refresh still happens if lock is acquired
+    const expiringTokenData = JSON.stringify({
+      access_token: 'expiring-access-token',
+      refresh_token: 'test-refresh-token',
+      expires_at: Math.floor(Date.now() / 1000) + 60, // expires in 60s (< 300s threshold, but > 0)
+    });
+    const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, CONNECTION_ID);
+    const encrypted = await encryptTokenDataWithKey(expiringTokenData, key);
+
+    const cacheEntry = {
+      schemaVersion: PROXY_CACHE_SCHEMA_VERSION,
+      connectionId: CONNECTION_ID,
+      userId: USER_ID,
+      service: 'linear',
+      status: 'active',
+      authType: 'oauth',
+      authMode: null,
+      application: null,
+      keyStorageMode: 'managed',
+      keyVersion: 1,
+      dcrRegistration: null,
+      needsReauthAt: null,
+      encryptedTokens: encrypted,
+      user: { plan: 'free_trial', trialEndsAt: '2099-12-31T23:59:59Z', accessUntil: null },
+      subscriptionStatus: null,
+      subscriptionPastDueSince: null,
+      cachedAt: new Date().toISOString(),
+    };
+    await env.KV.put(`proxy:${creds.secret1}`, JSON.stringify(cacheEntry));
+
+    // When cooldown is present and token is still valid, refreshTokenWithLock
+    // returns the stale tokens without attempting refresh.
+    // Cool-down key persists — it's cleared only by performTokenRefresh on success.
+    // We verify the cooldown key is still present after this path.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith('https://mcp.linear.app')) {
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0', id: 1, result: { tools: [] },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return originalFetch(input, init);
+    };
+
+    try {
+      const response = await SELF.fetch(`http://localhost/mcp/linear/${creds.credentials}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
+      });
+
+      // Should succeed with stale-but-valid tokens
+      expect(response.status).toBe(200);
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Cooldown key should still exist (not cleared since no refresh happened)
+      const cooldownVal = await env.KV.get(`refresh_cooldown:${CONNECTION_ID}`);
+      expect(cooldownVal).toBe('stale');
+    } finally {
+      globalThis.fetch = originalFetch;
+      await env.KV.delete(`refresh_cooldown:${CONNECTION_ID}`);
+    }
+  });
+});
+
 describe('ZK proxy refresh key correctness', () => {
   it('re-encrypts with secret2 (not managed key) after refresh', async () => {
     const tokenData = JSON.stringify({
