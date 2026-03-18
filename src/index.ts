@@ -131,7 +131,7 @@ async function authenticateRequest(request: Request, env: Env, ctx: ExecutionCon
   const maxUsers = env.MAX_USERS ? parseInt(env.MAX_USERS, 10) : undefined;
   try {
     const { user, isNew } = await ensureUser(env.DB, result.userId, { maxUsers, email: email ?? undefined });
-    if (isNew) {
+    if (isNew && env.SECRET_ENV_PREFIX === 'live') {
       ctx.waitUntil(sendNewUserNotification(env, user));
     }
   } catch (err) {
