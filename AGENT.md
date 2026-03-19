@@ -35,12 +35,12 @@ If a change affects both the API and UI (e.g. adding a field to a type, changing
 
 ## Secrets
 
-The real `wrangler.toml` is gitignored. CI injects it from the `WRANGLER_TOML` GitHub secret. To update:
-```bash
-gh secret set WRANGLER_TOML < wrangler.toml
-```
+The real `wrangler.toml` is gitignored. CI injects it from the `WRANGLER_TOML` GitHub secret. When `wrangler.toml` changes, **both repos' secrets must be updated**.
 
-The monorepo also needs a copy as `WORKER_WRANGLER_TOML`:
+**IMPORTANT: Run these commands from the standalone repo (`~/Documents/github/bindify-proxy`), NOT from a submodule checkout.** The submodule does not contain the full `wrangler.toml`.
+
 ```bash
+# From ~/Documents/github/bindify-proxy (NOT a submodule checkout)
+gh secret set WRANGLER_TOML < wrangler.toml
 gh secret set WORKER_WRANGLER_TOML -R dylancwood/bindify < wrangler.toml
 ```
