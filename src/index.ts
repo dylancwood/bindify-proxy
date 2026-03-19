@@ -17,6 +17,7 @@ import { processWebhookEvent, isHandledEvent } from './billing/webhook';
 import { getUserById } from './db/queries';
 import { cleanupStaleSuspendedConnections } from './cleanup';
 import { handleScheduledRefresh } from './scheduler';
+import { detectOrphanedFingerprints } from './rotation';
 import { checkKvD1Consistency } from './consistency';
 import { handleGenerateNonce, handleSupportTicket } from './api/support';
 import { handleCspReport } from './api/csp-report';
@@ -673,6 +674,12 @@ export default {
       case '0 4,10,16,22 * * *': {
         const result = await checkKvD1Consistency(env);
         log.info('Consistency check completed', result);
+        break;
+      }
+      case '* * * * *': {
+        const keys = await getManagedEncryptionKeys(env);
+        const fingerprints = keys.map((k) => k.fingerprint);
+        await detectOrphanedFingerprints(env.DB, fingerprints, log);
         break;
       }
       default:
