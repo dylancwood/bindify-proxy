@@ -48,7 +48,7 @@ export async function refreshManagedConnection(connection: Connection, env: Env)
         `refreshManagedConnection called with key_storage_mode=${connection.key_storage_mode}, connectionId=${connection.id}`
       );
     }
-    const keys = getManagedEncryptionKeys(env);
+    const keys = await getManagedEncryptionKeys(env);
     const masterKeyStr = getManagedKey(keys, connection.key_version);
     const encryptionKey = await deriveManagedEncryptionKey(masterKeyStr, connection.id);
     if (!connection.encrypted_tokens) {
@@ -251,7 +251,7 @@ export async function keepaliveManagedConnection(connection: Connection, env: En
         `keepaliveManagedConnection called with key_storage_mode=${connection.key_storage_mode}, connectionId=${connection.id}`
       );
     }
-    const keys = getManagedEncryptionKeys(env);
+    const keys = await getManagedEncryptionKeys(env);
     const masterKeyStr = getManagedKey(keys, connection.key_version);
     const encryptionKey = await deriveManagedEncryptionKey(masterKeyStr, connection.id);
     if (!connection.encrypted_tokens) {
@@ -391,7 +391,7 @@ export async function keepaliveDCRRegistrations(env: Env): Promise<void> {
     // Decrypt and group by client_id
     const byClientId = new Map<string, { reg: DCRRegistration; connections: typeof dcrConnections.results }>();
     for (const row of dcrConnections.results) {
-      const keys = getManagedEncryptionKeys(env);
+      const keys = await getManagedEncryptionKeys(env);
       const masterKeyStr = getManagedKey(keys, row.key_version);
       const key = await deriveManagedEncryptionKey(masterKeyStr, row.id);
       const decrypted = await decryptTokenDataWithKey(row.dcr_registration, key);

@@ -237,7 +237,7 @@ export async function handleCallback(
   const keyStorageMode = pkceState.keyStorageMode || 'zero_knowledge';
 
   // Encrypt tokens based on storage mode
-  const keys = getManagedEncryptionKeys(env);
+  const keys = await getManagedEncryptionKeys(env);
   const active = getActiveKeyVersion(keys);
   const activeKeyVersion = active.version;
   let encryptedTokens: string;

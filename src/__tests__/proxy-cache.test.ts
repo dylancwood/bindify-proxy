@@ -389,7 +389,7 @@ describe('decryptCacheTokens', () => {
       encryptedTokens: encrypted,
     } as any;
 
-    const result = await decryptCacheTokens(entry, 'my-secret2', getManagedEncryptionKeys(env as any));
+    const result = await decryptCacheTokens(entry, 'my-secret2', await getManagedEncryptionKeys(env as any));
     expect(result).toEqual(tokens);
   });
 
@@ -406,7 +406,7 @@ describe('decryptCacheTokens', () => {
       encryptedTokens: encrypted,
     } as any;
 
-    const result = await decryptCacheTokens(entry, 'unused-secret2', getManagedEncryptionKeys(env as any));
+    const result = await decryptCacheTokens(entry, 'unused-secret2', await getManagedEncryptionKeys(env as any));
     expect(result).toEqual(tokens);
   });
 
@@ -422,7 +422,7 @@ describe('decryptCacheTokens', () => {
       encryptedTokens: encrypted,
     } as any;
 
-    const result = await decryptCacheTokens(entry, 'my-secret2', getManagedEncryptionKeys(env as any));
+    const result = await decryptCacheTokens(entry, 'my-secret2', await getManagedEncryptionKeys(env as any));
     expect(result).toEqual(apiKeyData);
   });
 });

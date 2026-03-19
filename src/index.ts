@@ -24,7 +24,7 @@ import { log } from './logger';
 import { parseAllowlist, isAllowlisted } from './bot-detection/allowlist';
 import { BlocklistCache } from './bot-detection/blocklist-cache';
 import { log404Event } from './bot-detection/log-404';
-import { parseManagedKeys } from './crypto';
+import { parseManagedKeys, computeKeyFingerprint } from './crypto';
 import type { ManagedKeyEntry } from './crypto';
 import { sendNewUserNotification } from './notifications';
 
@@ -47,7 +47,7 @@ export interface Env {
   STRIPE_PRICE_CONNECTIONS: string;
   CLERK_SECRET_KEY: string;
   MANAGED_ENCRYPTION_MASTER_KEY?: string; // Legacy fallback — remove after rotation
-  MANAGED_ENCRYPTION_KEYS?: string; // JSON array: [{"version":1,"key":"..."}]
+  MANAGED_ENCRYPTION_KEYS?: string; // JSON array: [{"key":"<hex-encoded-key>"}] — fingerprint computed at parse time
   SECRET_ENV_PREFIX: string;
   // Staging-only restrictions (not set in production — checks skipped when absent)
   MAX_USERS?: string;
@@ -69,16 +69,17 @@ export interface Env {
   OPS_NOTIFICATION_ORIGIN_EMAIL?: string;
 }
 
-export function getManagedEncryptionKeys(env: Env): ManagedKeyEntry[] {
+export async function getManagedEncryptionKeys(env: Env): Promise<ManagedKeyEntry[]> {
   if (managedKeysCache) return managedKeysCache;
 
   if (env.MANAGED_ENCRYPTION_KEYS) {
-    managedKeysCache = parseManagedKeys(env.MANAGED_ENCRYPTION_KEYS);
+    managedKeysCache = await parseManagedKeys(env.MANAGED_ENCRYPTION_KEYS);
   } else if (env.MANAGED_ENCRYPTION_MASTER_KEY) {
-    // Fallback: wrap legacy single key as version 1
-    managedKeysCache = [{ version: 1, key: env.MANAGED_ENCRYPTION_MASTER_KEY }];
+    // Legacy fallback: wrap single key as first entry
+    const fingerprint = await computeKeyFingerprint(env.MANAGED_ENCRYPTION_MASTER_KEY);
+    managedKeysCache = [{ key: env.MANAGED_ENCRYPTION_MASTER_KEY, fingerprint }];
   } else {
-    throw new Error('Neither MANAGED_ENCRYPTION_KEYS nor MANAGED_ENCRYPTION_MASTER_KEY is set');
+    throw new Error('MANAGED_ENCRYPTION_KEYS or MANAGED_ENCRYPTION_MASTER_KEY must be set');
   }
 
   return managedKeysCache;

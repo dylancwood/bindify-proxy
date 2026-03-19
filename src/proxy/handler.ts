@@ -189,7 +189,7 @@ async function performTokenRefresh(
   // Get client credentials
   let clientId: string;
   if (serviceDef.config.useDCR && entry.dcrRegistration) {
-    const keys = getManagedEncryptionKeys(env);
+    const keys = await getManagedEncryptionKeys(env);
     const dcrMasterKey = getManagedKey(keys, entry.keyVersion);
     const dcrKey = await deriveManagedEncryptionKey(dcrMasterKey, entry.connectionId);
     const decryptedDcr = await decryptTokenDataWithKey(entry.dcrRegistration, dcrKey);
@@ -329,7 +329,7 @@ async function performTokenRefresh(
   // Re-encrypt and write to cache
   let encrypted: string;
   if (entry.keyStorageMode === 'managed') {
-    const keys = getManagedEncryptionKeys(env);
+    const keys = await getManagedEncryptionKeys(env);
     const active = getActiveKeyVersion(keys);
     const encKey = await deriveManagedEncryptionKey(active.key, entry.connectionId);
     encrypted = await encryptTokenDataWithKey(JSON.stringify(updated), encKey);
@@ -442,7 +442,7 @@ async function refreshTokenWithLock(
     if (refreshedRaw) {
       try {
         const parsed = JSON.parse(refreshedRaw) as ProxyCacheEntry;
-        const refreshedTokens = await decryptCacheTokens(parsed, secret2, getManagedEncryptionKeys(env)) as TokenData;
+        const refreshedTokens = await decryptCacheTokens(parsed, secret2, await getManagedEncryptionKeys(env)) as TokenData;
         if (refreshedTokens.expires_at > Math.floor(Date.now() / 1000)) {
           return refreshedTokens;
         }
@@ -577,7 +577,7 @@ async function resolveProxyAuth(
     // Decrypt tokens and build auth
     let auth: AuthResult;
     try {
-      const tokenData = await decryptCacheTokens(entry, params.secret2, getManagedEncryptionKeys(env));
+      const tokenData = await decryptCacheTokens(entry, params.secret2, await getManagedEncryptionKeys(env));
       auth = await buildAuthFromCache(entry, tokenData, params.service, env, params.secret1, params.secret2, ctx);
     } catch (err) {
       if (err instanceof RefreshCooldownError) {
