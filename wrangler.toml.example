@@ -70,7 +70,12 @@ IP_ALLOWLIST = ""
 SECRET_ENV_PREFIX = "live"
 
 [triggers]
-crons = ["21 5 * * *", "0 2,8,14,20 * * *", "0 4,10,16,22 * * *"]
+# Cron triggers:
+# * * * * *           - Key rotation processing and orphan fingerprint detection (every minute)
+# 21 5 * * *          - Daily token refresh
+# 0 2,8,14,20 * * *   - Keepalive checks (every 6 hours)
+# 0 4,10,16,22 * * *  - Consistency checks (every 6 hours)
+crons = ["* * * * *", "21 5 * * *", "0 2,8,14,20 * * *", "0 4,10,16,22 * * *"]
 
 # Optional: staging environment
 # [env.staging]
