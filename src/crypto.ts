@@ -181,11 +181,11 @@ export async function computeKeyFingerprint(keyHex: string): Promise<string> {
 }
 
 export interface ManagedKeyEntry {
-  version: number;
   key: string;
+  fingerprint: string; // computed via computeKeyFingerprint, not stored in config
 }
 
-export function parseManagedKeys(json: string): ManagedKeyEntry[] {
+export async function parseManagedKeys(json: string): Promise<ManagedKeyEntry[]> {
   const parsed = JSON.parse(json);
   if (!Array.isArray(parsed)) {
     throw new Error('MANAGED_ENCRYPTION_KEYS must be a JSON array');
@@ -193,20 +193,23 @@ export function parseManagedKeys(json: string): ManagedKeyEntry[] {
   if (parsed.length === 0) {
     throw new Error('MANAGED_ENCRYPTION_KEYS must contain at least one key');
   }
-  const seen = new Set<number>();
+
+  const entries: ManagedKeyEntry[] = [];
+  const seenFingerprints = new Set<string>();
+
   for (const entry of parsed) {
-    if (typeof entry.version !== 'number' || entry.version < 1 || !Number.isInteger(entry.version)) {
-      throw new Error(`Key version must be a positive integer, got: ${entry.version}`);
+    if (typeof entry.key !== 'string' || entry.key.length === 0) {
+      throw new Error('Key must be a non-empty string');
     }
-    if (typeof entry.key !== 'string' || !entry.key) {
-      throw new Error(`Key for version ${entry.version} must be a non-empty string`);
+    const fingerprint = await computeKeyFingerprint(entry.key);
+    if (seenFingerprints.has(fingerprint)) {
+      throw new Error(`Duplicate key fingerprint: ${fingerprint}`);
     }
-    if (seen.has(entry.version)) {
-      throw new Error(`Duplicate key version: ${entry.version}`);
-    }
-    seen.add(entry.version);
+    seenFingerprints.add(fingerprint);
+    entries.push({ key: entry.key, fingerprint });
   }
-  return parsed as ManagedKeyEntry[];
+
+  return entries;
 }
 
 export function getManagedKey(keys: ManagedKeyEntry[], version: number): string {

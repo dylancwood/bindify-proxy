@@ -68,39 +68,34 @@ describe('Managed encryption', () => {
 });
 
 describe('parseManagedKeys', () => {
-  it('parses valid JSON array', () => {
-    const keys = parseManagedKeys('[{"version":1,"key":"aabbcc"},{"version":2,"key":"ddeeff"}]');
+  it('parses valid JSON array and computes fingerprints', async () => {
+    const key1 = 'a'.repeat(64);
+    const key2 = 'b'.repeat(64);
+    const json = JSON.stringify([{ key: key1 }, { key: key2 }]);
+    const keys = await parseManagedKeys(json);
     expect(keys).toHaveLength(2);
-    expect(keys[0]).toEqual({ version: 1, key: 'aabbcc' });
-    expect(keys[1]).toEqual({ version: 2, key: 'ddeeff' });
+    expect(keys[0].key).toBe(key1);
+    expect(keys[0].fingerprint).toHaveLength(16);
+    expect(keys[1].key).toBe(key2);
+    expect(keys[0].fingerprint).not.toBe(keys[1].fingerprint);
   });
 
-  it('rejects empty array', () => {
-    expect(() => parseManagedKeys('[]')).toThrow('at least one key');
+  it('rejects non-array JSON', async () => {
+    await expect(parseManagedKeys('{"key":"abc"}')).rejects.toThrow('must be a JSON array');
   });
 
-  it('rejects duplicate versions', () => {
-    expect(() => parseManagedKeys('[{"version":1,"key":"aa"},{"version":1,"key":"bb"}]')).toThrow('Duplicate');
+  it('rejects empty array', async () => {
+    await expect(parseManagedKeys('[]')).rejects.toThrow('at least one key');
   });
 
-  it('rejects non-positive version', () => {
-    expect(() => parseManagedKeys('[{"version":0,"key":"aa"}]')).toThrow('positive integer');
+  it('rejects entries with empty key', async () => {
+    await expect(parseManagedKeys('[{"key":""}]')).rejects.toThrow('non-empty string');
   });
 
-  it('rejects negative version', () => {
-    expect(() => parseManagedKeys('[{"version":-1,"key":"aa"}]')).toThrow('positive integer');
-  });
-
-  it('rejects missing key field', () => {
-    expect(() => parseManagedKeys('[{"version":1}]')).toThrow();
-  });
-
-  it('rejects non-string key', () => {
-    expect(() => parseManagedKeys('[{"version":1,"key":123}]')).toThrow();
-  });
-
-  it('rejects non-array JSON', () => {
-    expect(() => parseManagedKeys('{"version":1,"key":"aa"}')).toThrow();
+  it('rejects duplicate fingerprints', async () => {
+    const key = 'a'.repeat(64);
+    const json = JSON.stringify([{ key }, { key }]);
+    await expect(parseManagedKeys(json)).rejects.toThrow('Duplicate key fingerprint');
   });
 });
 
