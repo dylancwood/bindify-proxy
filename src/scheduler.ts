@@ -1,7 +1,7 @@
 import type { Env } from './index';
 import type { Connection, TokenData } from '@bindify/types';
 import { getStaleConnections, updateConnectionLastRefreshed, updateConnectionStatus, setNeedsReauthAt, clearNeedsReauthAt, cleanupExpiredRefreshLocks } from './db/queries';
-import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, getManagedKey, getActiveKeyVersion, PERMANENT_TOKEN_EXPIRY_SECONDS } from './crypto';
+import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, getManagedKey, getActiveKey, PERMANENT_TOKEN_EXPIRY_SECONDS } from './crypto';
 import { getManagedEncryptionKeys } from './index';
 import { getService } from './services/registry';
 import { getDCRClientId, checkDCRRegistrationDirect } from './services/dcr';
@@ -49,7 +49,7 @@ export async function refreshManagedConnection(connection: Connection, env: Env)
       );
     }
     const keys = await getManagedEncryptionKeys(env);
-    const masterKeyStr = getManagedKey(keys, connection.key_version);
+    const masterKeyStr = getManagedKey(keys, connection.key_fingerprint);
     const encryptionKey = await deriveManagedEncryptionKey(masterKeyStr, connection.id);
     if (!connection.encrypted_tokens) {
       log.error('Missing encrypted_tokens for refresh', undefined, { connectionId: connection.id });
@@ -187,14 +187,14 @@ export async function refreshManagedConnection(connection: Connection, env: Env)
       return false;
     }
 
-    const active = getActiveKeyVersion(keys);
+    const active = getActiveKey(keys);
     const activeEncKey = await deriveManagedEncryptionKey(active.key, connection.id);
     const encrypted = await encryptTokenDataWithKey(JSON.stringify(updated), activeEncKey);
 
     // Write via proxy cache so the proxy path sees fresh tokens
     await withProxyCache(env, connection.secret_url_segment_1, null, async (entry, write) => {
       entry.encryptedTokens = encrypted;
-      entry.keyVersion = active.version;
+      entry.keyFingerprint = active.fingerprint;
       await write({ isTokenUpdate: true });
     });
 
@@ -252,7 +252,7 @@ export async function keepaliveManagedConnection(connection: Connection, env: En
       );
     }
     const keys = await getManagedEncryptionKeys(env);
-    const masterKeyStr = getManagedKey(keys, connection.key_version);
+    const masterKeyStr = getManagedKey(keys, connection.key_fingerprint);
     const encryptionKey = await deriveManagedEncryptionKey(masterKeyStr, connection.id);
     if (!connection.encrypted_tokens) {
       log.error('Missing encrypted_tokens for keepalive', undefined, { connectionId: connection.id });
@@ -382,17 +382,17 @@ export async function keepaliveDCRRegistrations(env: Env): Promise<void> {
     // Fetch all active connections with DCR registration
     const dcrConnections = await env.DB
       .prepare(`
-        SELECT id, dcr_registration, secret_url_segment_1, key_version FROM connections
+        SELECT id, dcr_registration, secret_url_segment_1, key_fingerprint FROM connections
         WHERE service = ? AND status = 'active' AND dcr_registration IS NOT NULL
       `)
       .bind(serviceId)
-      .all<{ id: string; dcr_registration: string; secret_url_segment_1: string; key_version: number }>();
+      .all<{ id: string; dcr_registration: string; secret_url_segment_1: string; key_fingerprint: string }>();
 
     // Decrypt and group by client_id
     const byClientId = new Map<string, { reg: DCRRegistration; connections: typeof dcrConnections.results }>();
     for (const row of dcrConnections.results) {
       const keys = await getManagedEncryptionKeys(env);
-      const masterKeyStr = getManagedKey(keys, row.key_version);
+      const masterKeyStr = getManagedKey(keys, row.key_fingerprint);
       const key = await deriveManagedEncryptionKey(masterKeyStr, row.id);
       const decrypted = await decryptTokenDataWithKey(row.dcr_registration, key);
       const reg = JSON.parse(decrypted) as DCRRegistration;

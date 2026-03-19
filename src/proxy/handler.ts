@@ -5,7 +5,7 @@ import { getService } from '../services/registry';
 import { updateConnectionLastUsed, updateConnectionStatus, setSuspendedAt, clearNeedsReauthAt, setNeedsReauthAt, getUserById, getSubscriptionsByUserId, acquireRefreshLock } from '../db/queries';
 import { isHealthCheckRequest, healthCheckResponse } from './healthcheck';
 import { jsonRpcError, extractRequestId } from './errors';
-import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, decodeCredentials, getManagedKey, getActiveKeyVersion, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
+import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, decodeCredentials, getManagedKey, getActiveKey, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
 import { getDCRClientId } from '../services/dcr';
 import { getCallbackUrl } from '../utils/url';
 import { log } from '../logger';
@@ -190,7 +190,7 @@ async function performTokenRefresh(
   let clientId: string;
   if (serviceDef.config.useDCR && entry.dcrRegistration) {
     const keys = await getManagedEncryptionKeys(env);
-    const dcrMasterKey = getManagedKey(keys, entry.keyVersion);
+    const dcrMasterKey = getManagedKey(keys, entry.keyFingerprint);
     const dcrKey = await deriveManagedEncryptionKey(dcrMasterKey, entry.connectionId);
     const decryptedDcr = await decryptTokenDataWithKey(entry.dcrRegistration, dcrKey);
     const reg = JSON.parse(decryptedDcr);
@@ -330,10 +330,10 @@ async function performTokenRefresh(
   let encrypted: string;
   if (entry.keyStorageMode === 'managed') {
     const keys = await getManagedEncryptionKeys(env);
-    const active = getActiveKeyVersion(keys);
+    const active = getActiveKey(keys);
     const encKey = await deriveManagedEncryptionKey(active.key, entry.connectionId);
     encrypted = await encryptTokenDataWithKey(JSON.stringify(updated), encKey);
-    entry.keyVersion = active.version;
+    entry.keyFingerprint = active.fingerprint;
   } else {
     encrypted = await encryptTokenData(JSON.stringify(updated), secret2);
   }

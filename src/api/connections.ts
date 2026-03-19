@@ -3,7 +3,7 @@ import type { ServiceId, TokenData, Connection } from '@bindify/types';
 import { getService } from '../services/registry';
 import { checkCanConnect } from '../auth/entitlements';
 import { createConnection, updateConnectionLastRefreshed, getConnectionsByUserId, getConnectionById, deleteConnection, getUserById, getSubscriptionsByUserId, updateConnectionStatus, setSuspendedAt } from '../db/queries';
-import { generateRandomString, generateCodeChallenge, generateSecretBytes, encodeCredentials, encodeSecret1, base64UrlEncode, encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, getActiveKeyVersion, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
+import { generateRandomString, generateCodeChallenge, generateSecretBytes, encodeCredentials, encodeSecret1, base64UrlEncode, encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, getActiveKey, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
 import { getManagedEncryptionKeys } from '../index';
 import { validateUpstreamApiKey } from './validate-api-key';
 import { fetchMcpToolsList, validateApplicationTools } from './validate-application';
@@ -238,8 +238,8 @@ export async function handleCallback(
 
   // Encrypt tokens based on storage mode
   const keys = await getManagedEncryptionKeys(env);
-  const active = getActiveKeyVersion(keys);
-  const activeKeyVersion = active.version;
+  const active = getActiveKey(keys);
+  const activeKeyFingerprint = active.fingerprint;
   let encryptedTokens: string;
   if (keyStorageMode === 'managed') {
     const managedKey = await deriveManagedEncryptionKey(active.key, connectionId);
@@ -286,7 +286,7 @@ export async function handleCallback(
       dcr_registration: encryptedDcrRegistration,
       encrypted_tokens: encryptedTokens,
       needs_reauth_at: null,
-      key_version: activeKeyVersion,
+      key_fingerprint: activeKeyFingerprint,
     });
   } catch (err) {
     // Restore old connection if new one fails to create
@@ -322,7 +322,7 @@ export async function handleCallback(
         last_used_at: null,
         last_refreshed_at: null,
         created_at: new Date().toISOString(),
-        key_version: activeKeyVersion,
+        key_fingerprint: activeKeyFingerprint,
       };
       const cacheEntry = buildProxyCacheEntry(
         cacheConnection,
@@ -620,7 +620,6 @@ export async function handleApiKeyConnect(
       dcr_registration: null,
       encrypted_tokens: encryptedData,
       needs_reauth_at: null,
-      key_version: 1,
       metadata,
     });
   } catch (err) {
@@ -657,7 +656,7 @@ export async function handleApiKeyConnect(
         last_used_at: null,
         last_refreshed_at: null,
         created_at: new Date().toISOString(),
-        key_version: 1,
+        key_fingerprint: '',
       };
       const cacheEntry = buildProxyCacheEntry(
         cacheConnection,
