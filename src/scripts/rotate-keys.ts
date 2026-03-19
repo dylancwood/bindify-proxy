@@ -158,9 +158,39 @@ async function handleRotation(args: CliArgs): Promise<void> {
   const { keysFile, env } = args;
   const dbName = getD1DatabaseName(env);
 
-  // Step 1: Read keys.json
-  const keys: KeyEntry[] = JSON.parse(readFileSync(keysFile, 'utf-8'));
+  // Step 1: Read and validate keys.json
+  let keys: KeyEntry[];
+  try {
+    const parsed = JSON.parse(readFileSync(keysFile, 'utf-8'));
+    if (!Array.isArray(parsed)) {
+      console.error(`${keysFile} must contain a JSON array`);
+      process.exit(1);
+    }
+    if (parsed.length === 0) {
+      console.error(`${keysFile} must contain at least one key`);
+      process.exit(1);
+    }
+    for (const [i, entry] of parsed.entries()) {
+      if (typeof entry.key !== 'string' || entry.key.length === 0) {
+        console.error(`Entry ${i} in ${keysFile} must have a non-empty "key" string`);
+        process.exit(1);
+      }
+    }
+    keys = parsed;
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      console.error(`${keysFile} is not valid JSON: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+
   const localFingerprints = keys.map((k) => computeLocalFingerprint(k.key));
+  const uniqueFingerprints = new Set(localFingerprints);
+  if (uniqueFingerprints.size !== localFingerprints.length) {
+    console.error(`${keysFile} contains duplicate keys`);
+    process.exit(1);
+  }
 
   console.log(`Local keys (${keys.length}):`);
   for (const fp of localFingerprints) {
