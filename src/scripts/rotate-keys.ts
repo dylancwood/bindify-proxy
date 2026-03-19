@@ -37,7 +37,8 @@ function getD1DatabaseName(env: string): string {
 }
 
 function wranglerEnvFlag(env: string): string {
-  return `--env ${env}`;
+  // Top-level wrangler.toml config is production; only staging has an [env.*] section
+  return env === 'production' ? '' : `--env ${env}`;
 }
 
 function execWranglerD1(sql: string, dbName: string, env: string): string {
