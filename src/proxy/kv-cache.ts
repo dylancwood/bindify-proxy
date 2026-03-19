@@ -7,7 +7,7 @@ import { validateDecryptedTokens } from '../token-parsing';
 import { log } from '../logger';
 import { writeConnectionEvent } from '../db/connection-events';
 
-export const PROXY_CACHE_SCHEMA_VERSION = 2;
+export const PROXY_CACHE_SCHEMA_VERSION = 3;
 
 const PROXY_CACHE_KEY_PREFIX = 'proxy:';
 
@@ -21,7 +21,7 @@ export interface ProxyCacheEntry {
   authMode: string | null;
   application: string | null;
   keyStorageMode: 'managed' | 'zero_knowledge';
-  keyVersion: number;
+  keyFingerprint: string;
   dcrRegistration: string | null;
   needsReauthAt: string | null;
   encryptedTokens: string;
@@ -64,8 +64,8 @@ export async function withProxyCache<T>(
 
     const d1BackupFn = async () => {
       const stmt = env.DB
-        .prepare('UPDATE connections SET encrypted_tokens = ?, key_version = ? WHERE id = ?')
-        .bind(entry.encryptedTokens, entry.keyVersion, entry.connectionId);
+        .prepare('UPDATE connections SET encrypted_tokens = ?, key_fingerprint = ? WHERE id = ?')
+        .bind(entry.encryptedTokens, entry.keyFingerprint, entry.connectionId);
 
       if (!opts?.isTokenUpdate) {
         // Metadata-only write: single attempt, silent catch (existing behavior)
@@ -83,8 +83,8 @@ export async function withProxyCache<T>(
         });
         try {
           await env.DB
-            .prepare('UPDATE connections SET encrypted_tokens = ?, key_version = ? WHERE id = ?')
-            .bind(entry.encryptedTokens, entry.keyVersion, entry.connectionId)
+            .prepare('UPDATE connections SET encrypted_tokens = ?, key_fingerprint = ? WHERE id = ?')
+            .bind(entry.encryptedTokens, entry.keyFingerprint, entry.connectionId)
             .run();
         } catch (retryErr) {
           log.warn('D1 backup write retry failed, writing recovery event', {
@@ -175,14 +175,14 @@ export function checkCachedAccessActive(
 }
 
 export async function decryptCacheTokens(
-  entry: Pick<ProxyCacheEntry, 'authType' | 'keyStorageMode' | 'keyVersion' | 'connectionId' | 'encryptedTokens'>,
+  entry: Pick<ProxyCacheEntry, 'authType' | 'keyStorageMode' | 'keyFingerprint' | 'connectionId' | 'encryptedTokens'>,
   secret2: string,
   managedEncryptionKeys: ManagedKeyEntry[]
 ): Promise<TokenData | ApiKeyData> {
   let decrypted: string;
 
   if (entry.keyStorageMode === 'managed') {
-    const masterKey = getManagedKey(managedEncryptionKeys, entry.keyVersion);
+    const masterKey = getManagedKey(managedEncryptionKeys, entry.keyFingerprint);
     const key = await deriveManagedEncryptionKey(masterKey, entry.connectionId);
     decrypted = await decryptTokenDataWithKey(entry.encryptedTokens, key);
   } else {
@@ -211,7 +211,7 @@ export function buildProxyCacheEntry(
     authMode: connection.auth_mode,
     application: connection.application,
     keyStorageMode: connection.key_storage_mode,
-    keyVersion: connection.key_version,
+    keyFingerprint: connection.key_fingerprint,
     dcrRegistration: connection.dcr_registration,
     needsReauthAt: connection.needs_reauth_at,
     encryptedTokens,
