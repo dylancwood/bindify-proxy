@@ -409,23 +409,21 @@ export async function keepaliveDCRRegistrations(env: Env): Promise<void> {
       const alive = await checkDCRRegistrationDirect(reg, serviceDef.config);
 
       if (!alive) {
-        log.error('DCR registration dead, flagging connections', undefined, {
+        // DCR client IDs (e.g. Notion) expire quickly, but existing access/refresh
+        // tokens continue to work. Don't flag connections — let refreshManagedConnection
+        // handle flagging if the actual token refresh fails.
+        log.warn('DCR registration dead — not flagging connections', {
           serviceId,
           clientId,
+          connectionCount: connections.length,
         });
 
-        const now = new Date().toISOString();
         for (const conn of connections) {
-          await setNeedsReauthAt(env.DB, conn.id, now);
-          await withProxyCache(env, conn.secret_url_segment_1, null, async (entry, write) => {
-            entry.needsReauthAt = now;
-            await write();
-          });
           await writeConnectionEvent(env.DB, {
             connectionId: conn.id,
             eventType: 'keepalive',
             category: 'dcr_dead',
-            detail: `DCR registration dead for client ${clientId}`,
+            detail: `DCR registration dead for client ${clientId} (not flagged)`,
           }).catch(() => {});
         }
       } else {

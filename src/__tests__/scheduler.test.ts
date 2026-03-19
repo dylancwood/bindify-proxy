@@ -103,7 +103,7 @@ describe('keepaliveDCRRegistrations', () => {
     vi.restoreAllMocks();
   });
 
-  it('flags connections when DCR registration is dead (404)', async () => {
+  it('does not flag connections when DCR registration is dead (404)', async () => {
     const keys = await getManagedEncryptionKeys(env as any);
     const activeKey = keys[keys.length - 1];
     const regJson = JSON.stringify({
@@ -123,9 +123,10 @@ describe('keepaliveDCRRegistrations', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('Not found', { status: 404 }));
     await keepaliveDCRRegistrations(env);
 
+    // Dead DCR registration should NOT flag connections — tokens may still work
     const conn = await env.DB.prepare('SELECT needs_reauth_at FROM connections WHERE id = ?')
       .bind('conn1').first<{ needs_reauth_at: string | null }>();
-    expect(conn!.needs_reauth_at).not.toBeNull();
+    expect(conn!.needs_reauth_at).toBeNull();
   });
 
   it('does not flag connections when registration is alive', async () => {
@@ -153,7 +154,7 @@ describe('keepaliveDCRRegistrations', () => {
     expect(conn!.needs_reauth_at).toBeNull();
   });
 
-  it('only flags connections with dead client_id when multiple exist', async () => {
+  it('does not flag any connections when dead or alive client_ids coexist', async () => {
     const keys = await getManagedEncryptionKeys(env as any);
     const activeKey = keys[keys.length - 1];
     const deadRegJson = JSON.stringify({ client_id: 'dead-client', registration_client_uri: 'https://mcp.notion.com/register/dead-client' });
@@ -188,11 +189,12 @@ describe('keepaliveDCRRegistrations', () => {
 
     await keepaliveDCRRegistrations(env);
 
+    // Neither connection should be flagged — dead DCR doesn't mean tokens are invalid
     const dead = await env.DB.prepare('SELECT needs_reauth_at FROM connections WHERE id = ?')
       .bind('conn-dead').first<{ needs_reauth_at: string | null }>();
     const alive = await env.DB.prepare('SELECT needs_reauth_at FROM connections WHERE id = ?')
       .bind('conn-alive').first<{ needs_reauth_at: string | null }>();
-    expect(dead!.needs_reauth_at).not.toBeNull();
+    expect(dead!.needs_reauth_at).toBeNull();
     expect(alive!.needs_reauth_at).toBeNull();
   });
 
