@@ -150,10 +150,7 @@ describe('Bot detection integration', () => {
       expect(row).toBeNull();
     });
 
-    // NOTE: Credential-bearing 404 logging (when a connection is not found) is added in Task 5
-    // (logPossibleBotEvent inside the proxy handler). Until then, matched-route 404s are not logged
-    // here — only catch-all (route_not_found) 404s are logged by index.ts.
-    it('does NOT log 404 events for credential-bearing paths (handler logging added in Task 5)', async () => {
+    it('logs 404 events for credential-bearing paths as invalid_credentials', async () => {
       const creds = makeFixedCredentials(0x60, 0x61);
 
       await SELF.fetch(`http://localhost/mcp/linear/${creds.credentials}`, {
@@ -162,12 +159,13 @@ describe('Bot detection integration', () => {
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      const row = await env.DB.prepare('SELECT raw_url, url_segment, secret_segment FROM proxy_404_log WHERE ip = ?')
+      const row = await env.DB.prepare('SELECT raw_url, url_segment, secret_segment, reason FROM proxy_404_log WHERE ip = ?')
         .bind('7.7.7.7')
-        .first<{ raw_url: string; url_segment: string; secret_segment: string }>();
+        .first<{ raw_url: string; url_segment: string; secret_segment: string; reason: string }>();
 
-      // Credential-bearing paths hit the handler (not the catch-all), so no log entry yet.
-      expect(row).toBeNull();
+      expect(row).not.toBeNull();
+      expect(row!.reason).toBe('invalid_credentials');
+      expect(row!.secret_segment).toBe(creds.credentials);
     });
 
     it('stores null secret_segment for malformed paths (fallthrough 404)', async () => {
@@ -187,10 +185,7 @@ describe('Bot detection integration', () => {
       expect(row!.secret_segment).toBeNull();
     });
 
-    // NOTE: Until Task 5 adds handler-level logging for credential-bearing paths, only
-    // catch-all (route_not_found) paths are logged. The credential-bearing paths match routes
-    // and are handled by the proxy handler without logging.
-    it('logs only catch-all (route_not_found) paths, not credential-bearing matched routes', async () => {
+    it('logs credential-bearing paths as invalid_credentials and catch-all as route_not_found', async () => {
       const creds1 = makeFixedCredentials(0x70, 0x71);
       const creds2 = makeFixedCredentials(0x72, 0x73);
 
@@ -206,14 +201,19 @@ describe('Bot detection integration', () => {
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      const rows = await env.DB.prepare('SELECT secret_segment, url_segment FROM proxy_404_log WHERE ip = ?')
+      const rows = await env.DB.prepare('SELECT secret_segment, url_segment, reason FROM proxy_404_log WHERE ip = ?')
         .bind('5.5.5.5')
-        .all<{ secret_segment: string | null; url_segment: string }>();
+        .all<{ secret_segment: string | null; url_segment: string; reason: string }>();
 
-      // Only the garbage/path hits the catch-all; credential-bearing paths match routes.
-      expect(rows.results.length).toBe(1);
-      expect(rows.results[0].url_segment).toBe('garbage/path');
-      expect(rows.results[0].secret_segment).toBeNull();
+      expect(rows.results.length).toBe(3);
+
+      const credRows = rows.results.filter(r => r.reason === 'invalid_credentials');
+      const routeRows = rows.results.filter(r => r.reason === 'route_not_found');
+
+      expect(credRows.length).toBe(2);
+      expect(routeRows.length).toBe(1);
+      expect(routeRows[0].url_segment).toBe('garbage/path');
+      expect(routeRows[0].secret_segment).toBeNull();
     });
   });
 });
