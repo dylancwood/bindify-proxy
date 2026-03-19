@@ -23,7 +23,7 @@ import { handleCspReport } from './api/csp-report';
 import { log } from './logger';
 import { parseAllowlist, isAllowlisted } from './bot-detection/allowlist';
 import { BlocklistCache } from './bot-detection/blocklist-cache';
-import { log404Event } from './bot-detection/log-404';
+import { logPossibleBotEvent } from './bot-detection/bot-events';
 import { parseManagedKeys } from './crypto';
 import type { ManagedKeyEntry } from './crypto';
 import { sendNewUserNotification } from './notifications';
@@ -156,30 +156,6 @@ async function hashIp(ip: string): Promise<string> {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-/**
- * Logs 404 events for /mcp/ paths, but ONLY when the 404 originates from our
- * own "connection not found" logic (not from an upstream server returning 404).
- * We detect this via the X-Bindify-Not-Found header set by our error functions.
- * This is safe to log with full credentials because 404 means the credentials
- * don't correspond to any real connection — needed for enumeration detection.
- */
-function maybeLog404(
-  response: Response, path: string, ip: string,
-  request: Request, ctx: ExecutionContext, env: Env
-): Response {
-  // Skip 404 logging for E2E bypass requests — prevents CI runners from
-  // accumulating 404 events that would trigger bot detection blocks.
-  const e2eBypass = env.E2E_BYPASS_TOKEN
-    && request.headers.get('X-E2E-Bypass') === env.E2E_BYPASS_TOKEN;
-  if (e2eBypass) return response;
-  if (response.status === 404 && path.startsWith('/mcp/') && response.headers.get('X-Bindify-Not-Found') === '1') {
-    const urlSegment = path.replace(/^\/mcp\//, '');
-    ctx.waitUntil(log404Event(env.DB, {
-      ip, rawUrl: request.url, urlSegment, headers: request.headers, cf: (request as any).cf,
-    }));
-  }
-  return response;
-}
 
 async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
@@ -262,7 +238,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     const streamableMatch = path.match(/^\/mcp\/([^/]+)\/([A-Za-z0-9_-]{86})$/);
     if (streamableMatch) {
       if (method === 'POST' || method === 'GET') {
-        return maybeLog404(await handleProxyStreamableHTTP(request, env, ctx), path, ip, request, ctx, env);
+        return await handleProxyStreamableHTTP(request, env, ctx);
       }
       return jsonRpcError(null, -32600, 'Method not allowed. Contact support@bindify.dev if you need help.', 405);
     }
@@ -271,7 +247,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     const streamableApiKeyMatch = path.match(/^\/mcp\/([^/]+)$/);
     if (streamableApiKeyMatch) {
       if (method === 'POST' || method === 'GET') {
-        return maybeLog404(await handleProxyStreamableHTTP(request, env, ctx), path, ip, request, ctx, env);
+        return await handleProxyStreamableHTTP(request, env, ctx);
       }
       return jsonRpcError(null, -32600, 'Method not allowed. Contact support@bindify.dev if you need help.', 405);
     }
@@ -306,10 +282,10 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
       }
 
       if (endpoint === 'sse' && method === 'GET') {
-        return maybeLog404(await handleProxySSE(request, env, ctx), path, ip, request, ctx, env);
+        return await handleProxySSE(request, env, ctx);
       }
       if (endpoint === 'messages' && method === 'POST') {
-        return maybeLog404(await handleProxyMessages(request, env, ctx), path, ip, request, ctx, env);
+        return await handleProxyMessages(request, env, ctx);
       }
       return Response.json({ error: 'method_not_allowed' }, { status: 405 });
     }
@@ -341,10 +317,10 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
       }
 
       if (endpoint === 'sse' && method === 'GET') {
-        return maybeLog404(await handleProxySSE(request, env, ctx), path, ip, request, ctx, env);
+        return await handleProxySSE(request, env, ctx);
       }
       if (endpoint === 'messages' && method === 'POST') {
-        return maybeLog404(await handleProxyMessages(request, env, ctx), path, ip, request, ctx, env);
+        return await handleProxyMessages(request, env, ctx);
       }
       return Response.json({ error: 'method_not_allowed' }, { status: 405 });
     }
@@ -619,8 +595,15 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
     if (path.startsWith('/mcp/')) {
       const urlSegment = path.replace(/^\/mcp\//, '');
-      ctx.waitUntil(log404Event(env.DB, {
-        ip, rawUrl: request.url, urlSegment, headers: request.headers, cf: (request as any).cf,
+      ctx.waitUntil(logPossibleBotEvent(env.DB, {
+        reason: 'route_not_found',
+        ip,
+        rawUrl: request.url,
+        urlSegment,
+        headers: request.headers,
+        cf: (request as any).cf,
+        e2eBypassToken: env.E2E_BYPASS_TOKEN,
+        e2eBypassHeader: request.headers.get('X-E2E-Bypass') ?? undefined,
       }));
     }
     return Response.json({ error: 'not_found', message: 'Not found' }, { status: 404 });
