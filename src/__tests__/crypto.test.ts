@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encryptTokenData, decryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, parseManagedKeys, getManagedKey, getActiveKeyVersion } from '../crypto';
+import { encryptTokenData, decryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, parseManagedKeys, getManagedKey, getActiveKeyVersion, computeKeyFingerprint } from '../crypto';
 
 describe('Zero-knowledge encryption', () => {
   it('encrypts and decrypts token data', async () => {
@@ -127,5 +127,27 @@ describe('getActiveKeyVersion', () => {
   it('works with single entry', () => {
     const keys = [{ version: 1, key: 'only' }];
     expect(getActiveKeyVersion(keys)).toEqual({ version: 1, key: 'only' });
+  });
+});
+
+describe('computeKeyFingerprint', () => {
+  it('returns first 16 hex chars of SHA-256 of key hex string', async () => {
+    const keyHex = 'a'.repeat(64);
+    const fingerprint = await computeKeyFingerprint(keyHex);
+    expect(fingerprint).toHaveLength(16);
+    expect(fingerprint).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('produces different fingerprints for different keys', async () => {
+    const fp1 = await computeKeyFingerprint('a'.repeat(64));
+    const fp2 = await computeKeyFingerprint('b'.repeat(64));
+    expect(fp1).not.toBe(fp2);
+  });
+
+  it('produces consistent fingerprints for the same key', async () => {
+    const key = 'deadbeef'.repeat(8);
+    const fp1 = await computeKeyFingerprint(key);
+    const fp2 = await computeKeyFingerprint(key);
+    expect(fp1).toBe(fp2);
   });
 });

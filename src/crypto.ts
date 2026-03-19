@@ -171,6 +171,15 @@ export async function decryptTokenDataWithKey(encrypted: string, key: CryptoKey)
 
 // ─── Versioned key management ───
 
+export async function computeKeyFingerprint(keyHex: string): Promise<string> {
+  const data = new TextEncoder().encode(keyHex);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = new Uint8Array(hashBuffer);
+  return Array.from(hashArray.slice(0, 8))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export interface ManagedKeyEntry {
   version: number;
   key: string;
