@@ -252,6 +252,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 <body style="font-family: system-ui; max-width: 600px; margin: 50px auto; padding: 0 20px;">
   <h1>Bindify</h1>
   <p>MCP Auth Proxy</p>
+  <p style="color: #ff6600; font-weight: bold;">[ROLLBACK-TEST: If you see this, the test deploy is active]</p>
   <p><a href="/dashboard" style="display: inline-block; padding: 12px 24px; background: #ff6600; color: white; text-decoration: none; border-radius: 6px;">Open Dashboard</a></p>
 </body></html>`,
         { headers: { 'Content-Type': 'text/html' } }
