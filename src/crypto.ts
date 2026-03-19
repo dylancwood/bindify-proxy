@@ -212,14 +212,17 @@ export async function parseManagedKeys(json: string): Promise<ManagedKeyEntry[]>
   return entries;
 }
 
-export function getManagedKey(keys: ManagedKeyEntry[], version: number): string {
-  const entry = keys.find(k => k.version === version);
+export function getManagedKey(keys: ManagedKeyEntry[], fingerprint: string): string {
+  const entry = keys.find((k) => k.fingerprint === fingerprint);
   if (!entry) {
-    throw new Error(`No managed encryption key found for version ${version}`);
+    throw new Error(`No managed encryption key found for fingerprint ${fingerprint}`);
   }
   return entry.key;
 }
 
-export function getActiveKeyVersion(keys: ManagedKeyEntry[]): ManagedKeyEntry {
-  return keys.reduce((max, k) => k.version > max.version ? k : max);
+export function getActiveKey(keys: ManagedKeyEntry[]): ManagedKeyEntry {
+  return keys[keys.length - 1];
 }
+
+/** @deprecated Use getActiveKey — will be removed after all call sites are updated */
+export const getActiveKeyVersion = getActiveKey;

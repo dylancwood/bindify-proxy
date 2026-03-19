@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encryptTokenData, decryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, parseManagedKeys, getManagedKey, getActiveKeyVersion, computeKeyFingerprint } from '../crypto';
+import { encryptTokenData, decryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, parseManagedKeys, getManagedKey, getActiveKey, computeKeyFingerprint } from '../crypto';
 
 describe('Zero-knowledge encryption', () => {
   it('encrypts and decrypts token data', async () => {
@@ -100,28 +100,35 @@ describe('parseManagedKeys', () => {
 });
 
 describe('getManagedKey', () => {
-  const keys = [{ version: 1, key: 'key-v1' }, { version: 3, key: 'key-v3' }];
-
-  it('returns correct key for version', () => {
-    expect(getManagedKey(keys, 1)).toBe('key-v1');
-    expect(getManagedKey(keys, 3)).toBe('key-v3');
+  it('returns key for matching fingerprint', async () => {
+    const key1 = 'a'.repeat(64);
+    const keys = await parseManagedKeys(JSON.stringify([{ key: key1 }]));
+    const result = getManagedKey(keys, keys[0].fingerprint);
+    expect(result).toBe(key1);
   });
 
-  it('throws for unknown version', () => {
-    expect(() => getManagedKey(keys, 2)).toThrow('version 2');
+  it('throws for unknown fingerprint', async () => {
+    const keys = await parseManagedKeys(JSON.stringify([{ key: 'a'.repeat(64) }]));
+    expect(() => getManagedKey(keys, 'nonexistent12345a')).toThrow(
+      'No managed encryption key found for fingerprint nonexistent12345a'
+    );
   });
 });
 
-describe('getActiveKeyVersion', () => {
-  it('returns highest version entry', () => {
-    const keys = [{ version: 1, key: 'old' }, { version: 5, key: 'newest' }, { version: 3, key: 'mid' }];
-    const active = getActiveKeyVersion(keys);
-    expect(active).toEqual({ version: 5, key: 'newest' });
+describe('getActiveKey', () => {
+  it('returns last entry in array', async () => {
+    const key1 = 'a'.repeat(64);
+    const key2 = 'b'.repeat(64);
+    const keys = await parseManagedKeys(JSON.stringify([{ key: key1 }, { key: key2 }]));
+    const active = getActiveKey(keys);
+    expect(active.key).toBe(key2);
   });
 
-  it('works with single entry', () => {
-    const keys = [{ version: 1, key: 'only' }];
-    expect(getActiveKeyVersion(keys)).toEqual({ version: 1, key: 'only' });
+  it('returns sole entry when only one key', async () => {
+    const key1 = 'a'.repeat(64);
+    const keys = await parseManagedKeys(JSON.stringify([{ key: key1 }]));
+    const active = getActiveKey(keys);
+    expect(active.key).toBe(key1);
   });
 });
 
