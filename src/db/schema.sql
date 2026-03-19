@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS connections (
     application TEXT,
     dcr_registration TEXT,
     encrypted_tokens TEXT,
+    -- key_version: DEPRECATED — kept for SQLite compatibility, ignored by application code (BIN-275)
     key_version INTEGER NOT NULL DEFAULT 1,
+    key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
     last_used_at TEXT,
     last_refreshed_at TEXT,
