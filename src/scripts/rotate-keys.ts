@@ -33,17 +33,16 @@ export type { KeyEntry, CompareResult } from './rotate-keys-core';
 // ─── Wrangler helpers ───
 
 function getD1DatabaseName(env: string): string {
-  // Convention: staging uses 'bindify-db-staging', production uses 'bindify-db'
   return env === 'staging' ? 'bindify-db-staging' : 'bindify-db';
 }
 
 function wranglerEnvFlag(env: string): string {
-  return env === 'staging' ? '--env staging' : '';
+  return `--env ${env}`;
 }
 
 function execWranglerD1(sql: string, dbName: string, env: string): string {
   const envFlag = wranglerEnvFlag(env);
-  const cmd = `wrangler d1 execute ${dbName} ${envFlag} --command="${sql.replace(/"/g, '\\"')}" --json`;
+  const cmd = `wrangler d1 execute ${dbName} ${envFlag} --remote --command="${sql.replace(/"/g, '\\"')}" --json`;
   try {
     return execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (err: any) {
@@ -52,13 +51,9 @@ function execWranglerD1(sql: string, dbName: string, env: string): string {
 }
 
 function execWranglerD1WithStdin(sql: string, dbName: string, env: string): string {
-  const envFlag = wranglerEnvFlag(env);
-  const cmd = `wrangler d1 execute ${dbName} ${envFlag} --json`;
-  try {
-    return execSync(cmd, { encoding: 'utf-8', input: sql, stdio: ['pipe', 'pipe', 'pipe'] });
-  } catch (err: any) {
-    throw new Error(`wrangler d1 execute failed: ${err.stderr || err.message}`);
-  }
+  // wrangler d1 execute doesn't support stdin — use --command instead.
+  // The SQL contains key material, but it's in process memory either way.
+  return execWranglerD1(sql, dbName, env);
 }
 
 function parseD1Result(output: string): any[] {
@@ -172,9 +167,15 @@ async function handleRotation(args: CliArgs): Promise<void> {
     console.log(`  ${fp}`);
   }
 
-  // Step 2: Check for existing pending/migrate rows
+  // Step 2: Clean up terminal rows, then check for in-progress ones
+  execWranglerD1(
+    "DELETE FROM pending_key_rotations WHERE status IN ('completed', 'failed', 'rejected')",
+    dbName,
+    env
+  );
+
   const pendingOutput = execWranglerD1(
-    "SELECT id, status FROM pending_key_rotations WHERE status IN ('pending', 'migrate', 'validated')",
+    "SELECT id, status FROM pending_key_rotations WHERE status IN ('pending', 'migrate', 'validated', 'in_progress')",
     dbName,
     env
   );
@@ -221,8 +222,8 @@ async function handleRotation(args: CliArgs): Promise<void> {
   writeFileSync(keysFile, JSON.stringify(updatedKeys, null, 2) + '\n');
   console.log(`Updated ${keysFile} (${updatedKeys.length} keys)`);
 
-  // Compute expected fingerprints (all keys that should be in the config after rotation)
-  const expectedFingerprints = updatedKeys.map((k) => computeLocalFingerprint(k.key));
+  // Expected fingerprints = what's currently in the secret (what the cron will see in its config)
+  const expectedFingerprints = remoteFingerprints;
 
   // Step 6: Insert pending rotation row (use stdin to avoid shell history exposure)
   const insertSql =
@@ -328,6 +329,15 @@ async function handleRotation(args: CliArgs): Promise<void> {
     status = rows[0].status;
     result = rows[0].result ? JSON.parse(rows[0].result) : null;
 
+    if (status === 'in_progress') {
+      // Show progress from the cron handler
+      if (result?.message) {
+        process.stdout.write(`\r${result.message}`);
+      } else {
+        process.stdout.write('.');
+      }
+      continue;
+    }
     if (status !== 'migrate') break;
     process.stdout.write('.');
   }

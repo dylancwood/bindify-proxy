@@ -58,8 +58,12 @@ async function validatePendingRequest(
     )
     .first<PendingKeyRotation>();
 
-  if (!row) return;
+  if (!row) {
+    logger.info('No pending rotation requests');
+    return;
+  }
 
+  logger.info('Processing pending rotation request', { id: row.id, status: row.status });
   const configFingerprints = configKeys.map((k) => k.fingerprint);
   let expectedFingerprints: string[];
   try {
@@ -149,10 +153,22 @@ async function executeMigration(
     )
     .first<PendingKeyRotation>();
 
-  if (!row) return;
+  if (!row) {
+    logger.info('No migrate rotation requests');
+    return;
+  }
 
+  logger.info('Processing migrate rotation request', { id: row.id });
   const activeKey = getActiveKey(configKeys);
   const activeFingerprint = activeKey.fingerprint;
+
+  // Mark as in_progress
+  await db
+    .prepare(
+      "UPDATE pending_key_rotations SET status = 'in_progress', result = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(JSON.stringify({ phase: 'migrating', message: 'Querying connections to migrate...' }), row.id)
+    .run();
 
   // Query all managed connections that need migration
   const connections = await db
@@ -162,8 +178,33 @@ async function executeMigration(
     .bind(activeFingerprint)
     .all<ManagedConnection>();
 
+  // Count already-current connections
+  const currentResult = await db
+    .prepare(
+      "SELECT COUNT(*) as count FROM connections WHERE key_storage_mode = 'managed' AND key_fingerprint = ?"
+    )
+    .bind(activeFingerprint)
+    .first<{ count: number }>();
+  let alreadyCurrent = currentResult?.count ?? 0;
+
+  // Update progress: starting migration
+  await db
+    .prepare(
+      "UPDATE pending_key_rotations SET result = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(
+      JSON.stringify({
+        phase: 'migrating',
+        message: `Re-encrypting ${connections.results.length} connections (${alreadyCurrent} already current)...`,
+        total: connections.results.length,
+        migrated: 0,
+        errors: 0,
+      }),
+      row.id
+    )
+    .run();
+
   let migrated = 0;
-  let alreadyCurrent = 0;
   const errors: Array<{ connectionId: string; error: string }> = [];
   const connectionCounts: Record<string, number> = {
     total: connections.results.length,

@@ -677,10 +677,17 @@ export default {
         break;
       }
       case '* * * * *': {
-        const keys = await getManagedEncryptionKeys(env);
-        const fingerprints = keys.map((k) => k.fingerprint);
-        await detectOrphanedFingerprints(env.DB, fingerprints, log);
-        await processRotationRequests(env.DB, env.KV, keys, log);
+        log.info('Key rotation cron fired');
+        try {
+          const keys = await getManagedEncryptionKeys(env);
+          log.info('Parsed managed keys', { count: keys.length, fingerprints: keys.map((k) => k.fingerprint) });
+          const fingerprints = keys.map((k) => k.fingerprint);
+          await detectOrphanedFingerprints(env.DB, fingerprints, log);
+          await processRotationRequests(env.DB, env.KV, keys, log);
+          log.info('Key rotation cron completed');
+        } catch (err) {
+          log.error('Key rotation cron failed', { error: err instanceof Error ? err.message : String(err) });
+        }
         break;
       }
       default:
