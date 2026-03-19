@@ -11,8 +11,8 @@ account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
 # STRIPE_WEBHOOK_SECRET - Stripe webhook signing secret
 # STRIPE_PRICE_CONNECTIONS - Stripe price ID for connections (graduated pricing)
 # CLERK_SECRET_KEY - Clerk secret key (for account deletion)
-# MANAGED_ENCRYPTION_KEYS - JSON array of versioned master keys for managed token encryption
-# Format: [{"version":1,"key":"<hex>"},{"version":2,"key":"<hex>"}]
+# MANAGED_ENCRYPTION_KEYS - JSON array of master keys for managed token encryption
+# Format: [{"key":"<hex>"},{"key":"<hex>"}]  (fingerprints computed at parse time)
 # Generate a key with: openssl rand -hex 32
 # Falls back to MANAGED_ENCRYPTION_MASTER_KEY (single key as v1) during transition
 # MANAGED_ENCRYPTION_MASTER_KEY - Legacy single master key (deprecated, use MANAGED_ENCRYPTION_KEYS)

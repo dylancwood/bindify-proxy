@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { checkKvD1Consistency } from '../consistency';
-import { buildProxyCacheEntry, writeProxyCache, type ProxyCacheEntry } from '../proxy/kv-cache';
+import { buildProxyCacheEntry, writeProxyCache, PROXY_CACHE_SCHEMA_VERSION, type ProxyCacheEntry } from '../proxy/kv-cache';
 import { createUser, createConnection } from '../db/queries';
 import type { Connection, User } from '@bindify/types';
 
@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS connections (
     dcr_registration TEXT,
     encrypted_tokens TEXT,
     key_version INTEGER NOT NULL DEFAULT 1,
+    key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
     last_used_at TEXT,
     last_refreshed_at TEXT,
@@ -108,7 +109,8 @@ function makeConnectionObj(overrides: Partial<Connection> & { id: string; secret
     label: null,
     dcr_registration: null,
     encrypted_tokens: 'encrypted-data',
-    key_version: 1,
+    key_version: 0,
+    key_fingerprint: '',
     needs_reauth_at: null,
     last_used_at: null,
     last_refreshed_at: null,
@@ -176,19 +178,19 @@ describe('checkKvD1Consistency', () => {
     expect(anomaly!.rectified).toBe(1);
   });
 
-  it('rectifies stale KV data (keyVersion mismatch)', async () => {
+  it('rectifies stale KV data (keyFingerprint mismatch)', async () => {
     await createConnection(env.DB, makeConnection({
       id: 'conn-stale',
       secret_url_segment_1: 'secret-stale',
       encrypted_tokens: 'encrypted-data',
-      key_version: 2,
+      key_fingerprint: 'fp-new',
     }));
-    // Update key_version in D1 (createConnection defaults to 1, so set it manually)
-    await env.DB.prepare('UPDATE connections SET key_version = 2 WHERE id = ?').bind('conn-stale').run();
+    // Update key_fingerprint in D1
+    await env.DB.prepare('UPDATE connections SET key_fingerprint = ? WHERE id = ?').bind('fp-new', 'conn-stale').run();
 
-    // Write a stale KV entry with key_version = 1
+    // Write a stale KV entry with old fingerprint
     const staleEntry = buildProxyCacheEntry(
-      makeConnectionObj({ id: 'conn-stale', secret_url_segment_1: 'secret-stale', key_version: 1 }),
+      makeConnectionObj({ id: 'conn-stale', secret_url_segment_1: 'secret-stale', key_fingerprint: 'fp-old' }),
       makeUser(),
       null,
       null,
@@ -203,7 +205,7 @@ describe('checkKvD1Consistency', () => {
     // Verify KV was updated
     const kvRaw = await env.KV.get('proxy:secret-stale');
     const kvEntry = JSON.parse(kvRaw!);
-    expect(kvEntry.keyVersion).toBe(2);
+    expect(kvEntry.keyFingerprint).toBe('fp-new');
 
     // Verify anomaly was reported
     const anomaly = await env.DB.prepare(
@@ -375,7 +377,7 @@ describe('checkKvD1Consistency', () => {
 
     const kvRaw = await env.KV.get('proxy:secret-tombstone');
     const kvEntry = JSON.parse(kvRaw!);
-    expect(kvEntry.schemaVersion).toBe(2);
+    expect(kvEntry.schemaVersion).toBe(PROXY_CACHE_SCHEMA_VERSION);
     expect(kvEntry.connectionId).toBe('conn-tombstone');
 
     const anomaly = await env.DB.prepare(

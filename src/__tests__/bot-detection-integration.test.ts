@@ -35,6 +35,7 @@ beforeAll(async () => {
     dcr_registration TEXT,
     encrypted_tokens TEXT,
     key_version INTEGER NOT NULL DEFAULT 1,
+    key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
       last_used_at TEXT,
       last_refreshed_at TEXT,

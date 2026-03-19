@@ -25,7 +25,7 @@ interface ConnectionRow {
   label: string | null;
   dcr_registration: string | null;
   encrypted_tokens: string | null;
-  key_version: number;
+  key_fingerprint: string;
   needs_reauth_at: string | null;
   last_used_at: string | null;
   last_refreshed_at: string | null;
@@ -49,7 +49,7 @@ const COMPARISON_FIELDS: Array<{
 }> = [
   { kvField: 'connectionId', d1Field: 'id' },
   { kvField: 'status', d1Field: 'status' },
-  { kvField: 'keyVersion', d1Field: 'key_version' },
+  { kvField: 'keyFingerprint', d1Field: 'key_fingerprint' },
   { kvField: 'userId', d1Field: 'user_id' },
   { kvField: 'service', d1Field: 'service' },
   { kvField: 'authType', d1Field: 'auth_type' },
@@ -89,7 +89,8 @@ function rowToConnection(row: ConnectionRow): Connection {
     label: row.label,
     dcr_registration: row.dcr_registration,
     encrypted_tokens: row.encrypted_tokens,
-    key_version: row.key_version,
+    key_version: 0, // deprecated — D1 column still exists but ignored
+    key_fingerprint: row.key_fingerprint,
     needs_reauth_at: row.needs_reauth_at,
     last_used_at: row.last_used_at,
     last_refreshed_at: row.last_refreshed_at,

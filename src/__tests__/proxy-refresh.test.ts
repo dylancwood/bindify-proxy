@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
 import { deriveManagedEncryptionKey, encryptTokenDataWithKey, encryptTokenData, decryptTokenData } from '../crypto';
+import { getManagedEncryptionKeys } from '../index';
 import { makeFixedCredentials } from './test-helpers';
 import { PROXY_CACHE_SCHEMA_VERSION } from '../proxy/kv-cache';
 
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS connections (
     dcr_registration TEXT,
     encrypted_tokens TEXT,
     key_version INTEGER NOT NULL DEFAULT 1,
+    key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
     last_used_at TEXT,
     last_refreshed_at TEXT,
@@ -100,7 +102,9 @@ beforeAll(async () => {
     refresh_token: 'test-refresh-token',
     expires_at: Math.floor(Date.now() / 1000) + 86400, // expires in 24h
   });
-  const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, CONNECTION_ID);
+  const managedKeys = await getManagedEncryptionKeys(env as any);
+  const activeKey = managedKeys[managedKeys.length - 1];
+  const key = await deriveManagedEncryptionKey(activeKey.key, CONNECTION_ID);
   const encrypted = await encryptTokenDataWithKey(tokenData, key);
   await env.KV.put(KV_KEY, encrypted);
 
@@ -115,7 +119,7 @@ beforeAll(async () => {
     authMode: null,
     application: null,
     keyStorageMode: 'managed',
-    keyVersion: 1,
+    keyFingerprint: activeKey.fingerprint,
     dcrRegistration: null,
     needsReauthAt: '2026-03-10T00:00:00Z',
     encryptedTokens: encrypted,
@@ -193,7 +197,9 @@ describe('Refresh cool-down returns 503', () => {
       refresh_token: 'test-refresh-token',
       expires_at: Math.floor(Date.now() / 1000) - 100, // expired
     });
-    const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, CONNECTION_ID);
+    const _managedKeys = await getManagedEncryptionKeys(env as any);
+    const _activeKey = _managedKeys[_managedKeys.length - 1];
+    const key = await deriveManagedEncryptionKey(_activeKey.key, CONNECTION_ID);
     const encrypted = await encryptTokenDataWithKey(expiredTokenData, key);
 
     const cacheEntry = {
@@ -206,7 +212,7 @@ describe('Refresh cool-down returns 503', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'managed',
-      keyVersion: 1,
+      keyFingerprint: _activeKey.fingerprint,
       dcrRegistration: null,
       needsReauthAt: null,
       encryptedTokens: encrypted,
@@ -243,7 +249,9 @@ describe('Refresh cool-down returns 503', () => {
       refresh_token: 'test-refresh-token',
       expires_at: Math.floor(Date.now() / 1000) + 60, // expires in 60s (< 300s threshold, but > 0)
     });
-    const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, CONNECTION_ID);
+    const _managedKeys2 = await getManagedEncryptionKeys(env as any);
+    const _activeKey2 = _managedKeys2[_managedKeys2.length - 1];
+    const key = await deriveManagedEncryptionKey(_activeKey2.key, CONNECTION_ID);
     const encrypted = await encryptTokenDataWithKey(expiringTokenData, key);
 
     const cacheEntry = {
@@ -256,7 +264,7 @@ describe('Refresh cool-down returns 503', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'managed',
-      keyVersion: 1,
+      keyFingerprint: _activeKey2.fingerprint,
       dcrRegistration: null,
       needsReauthAt: null,
       encryptedTokens: encrypted,
@@ -331,7 +339,7 @@ describe('ZK proxy refresh key correctness', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'zero_knowledge',
-      keyVersion: 1,
+      keyFingerprint: '',
       dcrRegistration: null,
       needsReauthAt: null,
       encryptedTokens: encrypted,

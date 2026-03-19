@@ -223,6 +223,3 @@ export function getManagedKey(keys: ManagedKeyEntry[], fingerprint: string): str
 export function getActiveKey(keys: ManagedKeyEntry[]): ManagedKeyEntry {
   return keys[keys.length - 1];
 }
-
-/** @deprecated Use getActiveKey — will be removed after all call sites are updated */
-export const getActiveKeyVersion = getActiveKey;

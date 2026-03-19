@@ -3,8 +3,9 @@ import { SELF, env } from 'cloudflare:test';
 import { validateTokensBeforeWrite } from '../token-validation';
 import { withProxyCache, PROXY_CACHE_SCHEMA_VERSION } from '../proxy/kv-cache';
 import type { ProxyCacheEntry } from '../proxy/kv-cache';
-import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey } from '../crypto';
+import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, computeKeyFingerprint } from '../crypto';
 import { refreshManagedConnection } from '../scheduler';
+import { getManagedEncryptionKeys } from '../index';
 import { makeFixedCredentials } from './test-helpers';
 
 const SCHEMA = `
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS connections (
     dcr_registration TEXT,
     encrypted_tokens TEXT,
     key_version INTEGER NOT NULL DEFAULT 1,
+    key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
     last_used_at TEXT,
     last_refreshed_at TEXT,
@@ -99,7 +101,7 @@ function makeCacheEntry(encryptedTokens: string): ProxyCacheEntry {
     authMode: null,
     application: null,
     keyStorageMode: 'managed',
-    keyVersion: 1,
+    keyFingerprint: '',
     dcrRegistration: null,
     needsReauthAt: null,
     encryptedTokens,
@@ -414,7 +416,7 @@ describe('Existing behavior audit: proxy refresh token preservation', () => {
     const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, 'conn-proxy-audit');
     const encryptedTokens = await encryptTokenDataWithKey(JSON.stringify(oldTokens), key);
 
-    const cacheEntry = makeCacheEntryForProxy('conn-proxy-audit', 'proxy-audit-user', encryptedTokens);
+    const cacheEntry = await makeCacheEntryForProxy('conn-proxy-audit', 'proxy-audit-user', encryptedTokens);
     await env.KV.put(`proxy:${proxyCreds.secret1}`, JSON.stringify(cacheEntry));
 
     // Mock upstream returning a token response with empty access_token
@@ -463,7 +465,7 @@ describe('Existing behavior audit: proxy refresh token preservation', () => {
     const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, 'conn-proxy-audit');
     const encryptedTokens = await encryptTokenDataWithKey(JSON.stringify(oldTokens), key);
 
-    const cacheEntry = makeCacheEntryForProxy('conn-proxy-audit', 'proxy-audit-user', encryptedTokens);
+    const cacheEntry = await makeCacheEntryForProxy('conn-proxy-audit', 'proxy-audit-user', encryptedTokens);
     await env.KV.put(`proxy:${proxyCreds.secret1}`, JSON.stringify(cacheEntry));
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any, _init?: any) => {
@@ -513,12 +515,14 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
 
   it('scheduler refresh with HTTP error preserves old tokens', async () => {
     const connId = 'conn-sched-audit-http-err';
+    const managedKeys = await getManagedEncryptionKeys(env as any);
+    const activeKey = managedKeys[managedKeys.length - 1];
     const oldTokens = {
       access_token: 'sched-old-access',
       refresh_token: 'sched-old-refresh',
       expires_at: Math.floor(Date.now() / 1000) - 100,
     };
-    const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, connId);
+    const key = await deriveManagedEncryptionKey(activeKey.key, connId);
     const encryptedTokens = await encryptTokenDataWithKey(JSON.stringify(oldTokens), key);
 
     await env.DB.prepare(
@@ -527,7 +531,7 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
     ).bind(connId, `s1-${connId}`, encryptedTokens).run();
 
     const dcr = JSON.stringify({ client_id: 'sched-test-client' });
-    const dcrKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, connId);
+    const dcrKey = await deriveManagedEncryptionKey(activeKey.key, connId);
     const encDcr = await encryptTokenDataWithKey(dcr, dcrKey);
     await env.DB.prepare('UPDATE connections SET dcr_registration = ? WHERE id = ?')
       .bind(encDcr, connId).run();
@@ -549,7 +553,8 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
       last_used_at: null,
       last_refreshed_at: null,
       created_at: '',
-      key_version: 1,
+      key_version: 0,
+      key_fingerprint: activeKey.fingerprint,
     };
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -567,12 +572,14 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
 
   it('scheduler refresh with invalid_grant sets needs_reauth_at without overwriting tokens', async () => {
     const connId = 'conn-sched-audit-invalid-grant';
+    const managedKeys = await getManagedEncryptionKeys(env as any);
+    const activeKey = managedKeys[managedKeys.length - 1];
     const oldTokens = {
       access_token: 'sched-old-access-ig',
       refresh_token: 'sched-old-refresh-ig',
       expires_at: Math.floor(Date.now() / 1000) - 100,
     };
-    const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, connId);
+    const key = await deriveManagedEncryptionKey(activeKey.key, connId);
     const encryptedTokens = await encryptTokenDataWithKey(JSON.stringify(oldTokens), key);
 
     await env.DB.prepare(
@@ -581,7 +588,7 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
     ).bind(connId, `s1-${connId}`, encryptedTokens).run();
 
     const dcr = JSON.stringify({ client_id: 'sched-ig-client' });
-    const dcrKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, connId);
+    const dcrKey = await deriveManagedEncryptionKey(activeKey.key, connId);
     const encDcr = await encryptTokenDataWithKey(dcr, dcrKey);
     await env.DB.prepare('UPDATE connections SET dcr_registration = ? WHERE id = ?')
       .bind(encDcr, connId).run();
@@ -603,7 +610,8 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
       last_used_at: null,
       last_refreshed_at: null,
       created_at: '',
-      key_version: 1,
+      key_version: 0,
+      key_fingerprint: activeKey.fingerprint,
     };
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -625,11 +633,13 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeCacheEntryForProxy(
+async function makeCacheEntryForProxy(
   connectionId: string,
   userId: string,
   encryptedTokens: string
-): ProxyCacheEntry {
+): Promise<ProxyCacheEntry> {
+  const keys = await getManagedEncryptionKeys(env as any);
+  const activeKey = keys[keys.length - 1];
   return {
     schemaVersion: PROXY_CACHE_SCHEMA_VERSION,
     connectionId,
@@ -640,7 +650,7 @@ function makeCacheEntryForProxy(
     authMode: null,
     application: null,
     keyStorageMode: 'managed',
-    keyVersion: 1,
+    keyFingerprint: activeKey.fingerprint,
     dcrRegistration: null,
     needsReauthAt: null,
     encryptedTokens,

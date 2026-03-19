@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import { acquireLock, releaseLock, keepaliveDCRRegistrations, refreshManagedConnection, keepaliveManagedConnection, refreshStaleConnections } from '../scheduler';
 import { createConnection } from '../db/queries';
-import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
+import { deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, PERMANENT_TOKEN_EXPIRY_SECONDS, computeKeyFingerprint } from '../crypto';
+import { getManagedEncryptionKeys } from '../index';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS connections (
     dcr_registration TEXT,
     encrypted_tokens TEXT,
     key_version INTEGER NOT NULL DEFAULT 1,
+    key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
     last_used_at TEXT,
     last_refreshed_at TEXT,
@@ -102,17 +104,20 @@ describe('keepaliveDCRRegistrations', () => {
   });
 
   it('flags connections when DCR registration is dead (404)', async () => {
+    const keys = await getManagedEncryptionKeys(env as any);
+    const activeKey = keys[keys.length - 1];
     const regJson = JSON.stringify({
       client_id: 'dead-client',
       registration_client_uri: 'https://mcp.notion.com/register/dead-client',
     });
-    const encKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, 'conn1');
+    const encKey = await deriveManagedEncryptionKey(activeKey.key, 'conn1');
     const encReg = await encryptTokenDataWithKey(regJson, encKey);
     await createConnection(env.DB, {
       id: 'conn1', user_id: 'user1', service: 'notion', secret_url_segment_1: 'secret1',
       status: 'active', key_storage_mode: 'managed',
       auth_type: 'oauth', auth_mode: null, application: null,
       dcr_registration: encReg, encrypted_tokens: null, needs_reauth_at: null,
+      key_fingerprint: activeKey.fingerprint,
     });
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('Not found', { status: 404 }));
@@ -124,17 +129,20 @@ describe('keepaliveDCRRegistrations', () => {
   });
 
   it('does not flag connections when registration is alive', async () => {
+    const keys = await getManagedEncryptionKeys(env as any);
+    const activeKey = keys[keys.length - 1];
     const regJson = JSON.stringify({
       client_id: 'alive-client',
       registration_client_uri: 'https://mcp.notion.com/register/alive-client',
     });
-    const encKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, 'conn2');
+    const encKey = await deriveManagedEncryptionKey(activeKey.key, 'conn2');
     const encReg = await encryptTokenDataWithKey(regJson, encKey);
     await createConnection(env.DB, {
       id: 'conn2', user_id: 'user1', service: 'notion', secret_url_segment_1: 'secret2',
       status: 'active', key_storage_mode: 'managed',
       auth_type: 'oauth', auth_mode: null, application: null,
       dcr_registration: encReg, encrypted_tokens: null, needs_reauth_at: null,
+      key_fingerprint: activeKey.fingerprint,
     });
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('ok', { status: 200 }));
@@ -146,12 +154,14 @@ describe('keepaliveDCRRegistrations', () => {
   });
 
   it('only flags connections with dead client_id when multiple exist', async () => {
+    const keys = await getManagedEncryptionKeys(env as any);
+    const activeKey = keys[keys.length - 1];
     const deadRegJson = JSON.stringify({ client_id: 'dead-client', registration_client_uri: 'https://mcp.notion.com/register/dead-client' });
     const aliveRegJson = JSON.stringify({ client_id: 'alive-client', registration_client_uri: 'https://mcp.notion.com/register/alive-client' });
 
-    const deadKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, 'conn-dead');
+    const deadKey = await deriveManagedEncryptionKey(activeKey.key, 'conn-dead');
     const encDeadReg = await encryptTokenDataWithKey(deadRegJson, deadKey);
-    const aliveKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, 'conn-alive');
+    const aliveKey = await deriveManagedEncryptionKey(activeKey.key, 'conn-alive');
     const encAliveReg = await encryptTokenDataWithKey(aliveRegJson, aliveKey);
 
     await createConnection(env.DB, {
@@ -159,12 +169,14 @@ describe('keepaliveDCRRegistrations', () => {
       status: 'active', key_storage_mode: 'managed',
       auth_type: 'oauth', auth_mode: null, application: null,
       dcr_registration: encDeadReg, encrypted_tokens: null, needs_reauth_at: null,
+      key_fingerprint: activeKey.fingerprint,
     });
     await createConnection(env.DB, {
       id: 'conn-alive', user_id: 'user1', service: 'notion', secret_url_segment_1: 'secret-alive',
       status: 'active', key_storage_mode: 'managed',
       auth_type: 'oauth', auth_mode: null, application: null,
       dcr_registration: encAliveReg, encrypted_tokens: null, needs_reauth_at: null,
+      key_fingerprint: activeKey.fingerprint,
     });
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
@@ -211,7 +223,9 @@ describe('refreshManagedConnection failure handling', () => {
   });
 
   async function setupManagedConnection(id: string, dcrRegistration: string | null) {
-    const encryptionKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, id);
+    const keys = await getManagedEncryptionKeys(env as any);
+    const activeKey = keys[keys.length - 1];
+    const encryptionKey = await deriveManagedEncryptionKey(activeKey.key, id);
     const tokens = JSON.stringify({
       access_token: 'access_old',
       refresh_token: 'refresh_old',
@@ -222,7 +236,7 @@ describe('refreshManagedConnection failure handling', () => {
     // Encrypt DCR registration with managed key (mirrors handleCallback behavior)
     let encryptedDcrRegistration: string | null = null;
     if (dcrRegistration) {
-      const dcrKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, id);
+      const dcrKey = await deriveManagedEncryptionKey(activeKey.key, id);
       encryptedDcrRegistration = await encryptTokenDataWithKey(dcrRegistration, dcrKey);
     }
 
@@ -239,9 +253,10 @@ describe('refreshManagedConnection failure handling', () => {
       dcr_registration: encryptedDcrRegistration,
       encrypted_tokens: encrypted,
       needs_reauth_at: null,
+      key_fingerprint: activeKey.fingerprint,
     };
     await createConnection(env.DB, conn);
-    return { ...conn, key_version: 1, created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
+    return { ...conn, key_version: 0, key_fingerprint: activeKey.fingerprint, created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
   }
 
   it('sets needs_reauth_at on invalid_grant', async () => {
@@ -308,7 +323,9 @@ describe('keepaliveManagedConnection', () => {
   });
 
   async function setupTodoistManagedConnection(id: string, needsReauthAt?: string) {
-    const encryptionKey = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, id);
+    const keys = await getManagedEncryptionKeys(env as any);
+    const activeKey = keys[keys.length - 1];
+    const encryptionKey = await deriveManagedEncryptionKey(activeKey.key, id);
     const tokens = JSON.stringify({
       access_token: 'todoist_access_token',
       refresh_token: '',
@@ -329,13 +346,14 @@ describe('keepaliveManagedConnection', () => {
       dcr_registration: null,
       encrypted_tokens: encrypted,
       needs_reauth_at: needsReauthAt ?? null,
+      key_fingerprint: activeKey.fingerprint,
     };
     await createConnection(env.DB, conn);
     if (needsReauthAt) {
       await env.DB.prepare('UPDATE connections SET needs_reauth_at = ? WHERE id = ?')
         .bind(needsReauthAt, id).run();
     }
-    return { ...conn, key_version: 1, created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
+    return { ...conn, key_version: 0, key_fingerprint: activeKey.fingerprint, created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
   }
 
   it('updates last_refreshed_at on successful keep-alive', async () => {
@@ -513,6 +531,8 @@ describe('ZK mode safety', () => {
       suspended_at: null,
       last_used_at: null,
       last_refreshed_at: null,
+      key_version: 0,
+      key_fingerprint: '',
       created_at: '',
     };
 

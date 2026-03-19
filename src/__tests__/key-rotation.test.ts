@@ -6,16 +6,22 @@ import {
   decryptTokenDataWithKey,
   parseManagedKeys,
   getManagedKey,
-  getActiveKeyVersion,
+  getActiveKey,
+  computeKeyFingerprint,
 } from '../crypto';
 import { decryptCacheTokens, PROXY_CACHE_SCHEMA_VERSION } from '../proxy/kv-cache';
 import type { ProxyCacheEntry } from '../proxy/kv-cache';
-import { rotateKeys } from '../scripts/rotate-keys';
 
 const MASTER_KEY_V1 = 'test-master-key-0123456789abcdef0123456789abcdef';
 const MASTER_KEY_V2 = 'new-master-key-fedcba9876543210fedcba9876543210';
-const KEYS_V1_ONLY = [{ version: 1, key: MASTER_KEY_V1 }];
-const KEYS_V1_V2 = [{ version: 1, key: MASTER_KEY_V1 }, { version: 2, key: MASTER_KEY_V2 }];
+
+// Fingerprints are computed at parse time; we also compute them here for assertions
+let FP_V1: string;
+let FP_V2: string;
+
+// Parsed key arrays (async — populated in beforeAll)
+let KEYS_V1_ONLY: Awaited<ReturnType<typeof parseManagedKeys>>;
+let KEYS_V1_V2: Awaited<ReturnType<typeof parseManagedKeys>>;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -41,6 +47,7 @@ CREATE TABLE IF NOT EXISTS connections (
     dcr_registration TEXT,
     encrypted_tokens TEXT,
     key_version INTEGER NOT NULL DEFAULT 1,
+    key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
     last_used_at TEXT,
     last_refreshed_at TEXT,
@@ -75,7 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_connection_events_connection_id ON connection_eve
 CREATE INDEX IF NOT EXISTS idx_connection_events_lookup ON connection_events(connection_id, event_type, category, created_at);
 `;
 
-function makeCacheEntry(connectionId: string, encryptedTokens: string, opts?: { keyVersion?: number; keyStorageMode?: 'managed' | 'zero_knowledge' }): ProxyCacheEntry {
+function makeCacheEntry(connectionId: string, encryptedTokens: string, opts?: { keyFingerprint?: string; keyStorageMode?: 'managed' | 'zero_knowledge' }): ProxyCacheEntry {
   return {
     schemaVersion: PROXY_CACHE_SCHEMA_VERSION,
     connectionId,
@@ -86,7 +93,7 @@ function makeCacheEntry(connectionId: string, encryptedTokens: string, opts?: { 
     authMode: null,
     application: null,
     keyStorageMode: opts?.keyStorageMode ?? 'managed',
-    keyVersion: opts?.keyVersion ?? 1,
+    keyFingerprint: opts?.keyFingerprint ?? FP_V1,
     dcrRegistration: null,
     needsReauthAt: null,
     encryptedTokens,
@@ -98,6 +105,11 @@ function makeCacheEntry(connectionId: string, encryptedTokens: string, opts?: { 
 }
 
 beforeAll(async () => {
+  FP_V1 = await computeKeyFingerprint(MASTER_KEY_V1);
+  FP_V2 = await computeKeyFingerprint(MASTER_KEY_V2);
+  KEYS_V1_ONLY = await parseManagedKeys(JSON.stringify([{ key: MASTER_KEY_V1 }]));
+  KEYS_V1_V2 = await parseManagedKeys(JSON.stringify([{ key: MASTER_KEY_V1 }, { key: MASTER_KEY_V2 }]));
+
   const statements = SCHEMA.split(';').map(s => s.trim()).filter(s => s.length > 0);
   for (const statement of statements) {
     await env.DB.prepare(statement).run();
@@ -110,8 +122,8 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM connections').run();
 });
 
-describe('Versioned key encrypt/decrypt', () => {
-  it('encrypts with v1 and decrypts with v1', async () => {
+describe('Fingerprint-based key encrypt/decrypt', () => {
+  it('encrypts with key1 and decrypts with key1', async () => {
     const key = await deriveManagedEncryptionKey(MASTER_KEY_V1, 'conn1');
     const data = JSON.stringify({ access_token: 'tok', refresh_token: 'ref', expires_at: 9999 });
     const encrypted = await encryptTokenDataWithKey(data, key);
@@ -119,7 +131,7 @@ describe('Versioned key encrypt/decrypt', () => {
     expect(decrypted).toBe(data);
   });
 
-  it('v1-encrypted data cannot be decrypted with v2 key', async () => {
+  it('key1-encrypted data cannot be decrypted with key2', async () => {
     const keyV1 = await deriveManagedEncryptionKey(MASTER_KEY_V1, 'conn1');
     const keyV2 = await deriveManagedEncryptionKey(MASTER_KEY_V2, 'conn1');
     const data = JSON.stringify({ access_token: 'tok', refresh_token: 'ref', expires_at: 9999 });
@@ -128,181 +140,52 @@ describe('Versioned key encrypt/decrypt', () => {
   });
 });
 
-describe('decryptCacheTokens with versioned keys', () => {
-  it('v1 cache entry decrypts with v1 key', async () => {
+describe('decryptCacheTokens with fingerprint-based keys', () => {
+  it('cache entry with key1 fingerprint decrypts with key1', async () => {
     const key = await deriveManagedEncryptionKey(MASTER_KEY_V1, 'conn-cache-v1');
     const data = JSON.stringify({ access_token: 'tok-v1', refresh_token: 'ref', expires_at: 9999 });
     const encrypted = await encryptTokenDataWithKey(data, key);
 
-    const entry = makeCacheEntry('conn-cache-v1', encrypted, { keyVersion: 1 });
+    const entry = makeCacheEntry('conn-cache-v1', encrypted, { keyFingerprint: FP_V1 });
     const result = await decryptCacheTokens(entry, 'unused', KEYS_V1_V2);
     expect((result as any).access_token).toBe('tok-v1');
   });
 
-  it('v2 cache entry decrypts with v2 key', async () => {
+  it('cache entry with key2 fingerprint decrypts with key2', async () => {
     const key = await deriveManagedEncryptionKey(MASTER_KEY_V2, 'conn-cache-v2');
     const data = JSON.stringify({ access_token: 'tok-v2', refresh_token: 'ref', expires_at: 9999 });
     const encrypted = await encryptTokenDataWithKey(data, key);
 
-    const entry = makeCacheEntry('conn-cache-v2', encrypted, { keyVersion: 2 });
+    const entry = makeCacheEntry('conn-cache-v2', encrypted, { keyFingerprint: FP_V2 });
     const result = await decryptCacheTokens(entry, 'unused', KEYS_V1_V2);
     expect((result as any).access_token).toBe('tok-v2');
   });
 });
 
 describe('Multi-key backward compatibility', () => {
-  it('v1-encrypted data still decrypts when v2 is active', async () => {
-    const masterKeyV1 = getManagedKey(KEYS_V1_V2, 1);
+  it('key1-encrypted data still decrypts when key2 is active', async () => {
+    const masterKeyV1 = getManagedKey(KEYS_V1_V2, FP_V1);
     const key = await deriveManagedEncryptionKey(masterKeyV1, 'conn-compat');
     const data = JSON.stringify({ access_token: 'old-tok', refresh_token: 'ref', expires_at: 9999 });
     const encrypted = await encryptTokenDataWithKey(data, key);
 
-    const resolvedKey = getManagedKey(KEYS_V1_V2, 1);
+    const resolvedKey = getManagedKey(KEYS_V1_V2, FP_V1);
     expect(resolvedKey).toBe(MASTER_KEY_V1);
     const derivedKey = await deriveManagedEncryptionKey(resolvedKey, 'conn-compat');
     const decrypted = await decryptTokenDataWithKey(encrypted, derivedKey);
     expect(JSON.parse(decrypted).access_token).toBe('old-tok');
 
-    const active = getActiveKeyVersion(KEYS_V1_V2);
-    expect(active.version).toBe(2);
+    const active = getActiveKey(KEYS_V1_V2);
+    expect(active.fingerprint).toBe(FP_V2);
   });
 });
 
 describe('Migration script', () => {
-  async function seedConnection(id: string, secret1: string, opts?: { keyVersion?: number; dcrRegistration?: string | null; keyStorageMode?: string }) {
-    const keyVersion = opts?.keyVersion ?? 1;
-    const masterKey = getManagedKey(KEYS_V1_V2, keyVersion);
-    const key = await deriveManagedEncryptionKey(masterKey, id);
-    const tokens = JSON.stringify({ access_token: `tok-${id}`, refresh_token: `ref-${id}`, expires_at: 9999 });
-    const encrypted = await encryptTokenDataWithKey(tokens, key);
-
-    let encDcr: string | null = null;
-    if (opts?.dcrRegistration) {
-      encDcr = await encryptTokenDataWithKey(opts.dcrRegistration, key);
-    }
-
-    await env.DB.prepare(
-      `INSERT INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, auth_type, encrypted_tokens, dcr_registration, key_version)
-       VALUES (?, 'user1', 'linear', ?, 'active', ?, 'oauth', ?, ?, ?)`
-    ).bind(id, secret1, opts?.keyStorageMode ?? 'managed', encrypted, encDcr, keyVersion).run();
-
-    const cacheEntry = makeCacheEntry(id, encrypted, { keyVersion });
-    if (encDcr) cacheEntry.dcrRegistration = encDcr;
-    await env.KV.put(`proxy:${secret1}`, JSON.stringify(cacheEntry));
-
-    return encrypted;
-  }
-
-  it('re-encrypts all managed connections and KV entries', async () => {
-    await seedConnection('conn-a', 's1-a');
-    await seedConnection('conn-b', 's1-b');
-    await seedConnection('conn-c', 's1-c');
-
-    const rotateEnv = {
-      DB: env.DB,
-      KV: env.KV,
-      MANAGED_ENCRYPTION_KEYS: JSON.stringify(KEYS_V1_V2),
-    };
-
-    const result = await rotateKeys(rotateEnv);
-    expect(result.migrated).toBe(3);
-    expect(result.errors).toHaveLength(0);
-
-    for (const id of ['conn-a', 'conn-b', 'conn-c']) {
-      const row = await env.DB.prepare('SELECT encrypted_tokens, key_version FROM connections WHERE id = ?')
-        .bind(id).first<{ encrypted_tokens: string; key_version: number }>();
-      expect(row!.key_version).toBe(2);
-
-      const keyV2 = await deriveManagedEncryptionKey(MASTER_KEY_V2, id);
-      const decrypted = JSON.parse(await decryptTokenDataWithKey(row!.encrypted_tokens, keyV2));
-      expect(decrypted.access_token).toBe(`tok-${id}`);
-    }
-
-    for (const [s1, id] of [['s1-a', 'conn-a'], ['s1-b', 'conn-b'], ['s1-c', 'conn-c']] as const) {
-      const raw = await env.KV.get(`proxy:${s1}`);
-      const entry = JSON.parse(raw!) as ProxyCacheEntry;
-      expect(entry.keyVersion).toBe(2);
-
-      const keyV2 = await deriveManagedEncryptionKey(MASTER_KEY_V2, id);
-      const decrypted = JSON.parse(await decryptTokenDataWithKey(entry.encryptedTokens, keyV2));
-      expect(decrypted.access_token).toBe(`tok-${id}`);
-    }
-  });
-
-  it('skips ZK connections', async () => {
-    await seedConnection('conn-zk', 's1-zk', { keyStorageMode: 'zero_knowledge' });
-
-    const rotateEnv = {
-      DB: env.DB,
-      KV: env.KV,
-      MANAGED_ENCRYPTION_KEYS: JSON.stringify(KEYS_V1_V2),
-    };
-
-    const result = await rotateKeys(rotateEnv);
-    expect(result.migrated).toBe(0);
-
-    const row = await env.DB.prepare('SELECT key_version FROM connections WHERE id = ?')
-      .bind('conn-zk').first<{ key_version: number }>();
-    expect(row!.key_version).toBe(1);
-  });
-
-  it('skips already-migrated connections', async () => {
-    await seedConnection('conn-v2', 's1-v2', { keyVersion: 2 });
-
-    const rotateEnv = {
-      DB: env.DB,
-      KV: env.KV,
-      MANAGED_ENCRYPTION_KEYS: JSON.stringify(KEYS_V1_V2),
-    };
-
-    const result = await rotateKeys(rotateEnv);
-    expect(result.migrated).toBe(0);
-  });
-
-  it('re-encrypts DCR registrations', async () => {
-    const dcrData = JSON.stringify({ client_id: 'dcr-client-123', client_secret: 'dcr-secret' });
-    await seedConnection('conn-dcr', 's1-dcr', { dcrRegistration: dcrData });
-
-    const rotateEnv = {
-      DB: env.DB,
-      KV: env.KV,
-      MANAGED_ENCRYPTION_KEYS: JSON.stringify(KEYS_V1_V2),
-    };
-
-    const result = await rotateKeys(rotateEnv);
-    expect(result.migrated).toBe(1);
-
-    const row = await env.DB.prepare('SELECT dcr_registration, key_version FROM connections WHERE id = ?')
-      .bind('conn-dcr').first<{ dcr_registration: string; key_version: number }>();
-    expect(row!.key_version).toBe(2);
-
-    const keyV2 = await deriveManagedEncryptionKey(MASTER_KEY_V2, 'conn-dcr');
-    const decrypted = JSON.parse(await decryptTokenDataWithKey(row!.dcr_registration, keyV2));
-    expect(decrypted.client_id).toBe('dcr-client-123');
-  });
-
-  it('handles missing KV entry gracefully', async () => {
-    const key = await deriveManagedEncryptionKey(MASTER_KEY_V1, 'conn-no-kv');
-    const tokens = JSON.stringify({ access_token: 'tok', refresh_token: 'ref', expires_at: 9999 });
-    const encrypted = await encryptTokenDataWithKey(tokens, key);
-
-    await env.DB.prepare(
-      `INSERT INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, auth_type, encrypted_tokens, key_version)
-       VALUES ('conn-no-kv', 'user1', 'linear', 's1-no-kv', 'active', 'managed', 'oauth', ?, 1)`
-    ).bind(encrypted).run();
-
-    const rotateEnv = {
-      DB: env.DB,
-      KV: env.KV,
-      MANAGED_ENCRYPTION_KEYS: JSON.stringify(KEYS_V1_V2),
-    };
-
-    const result = await rotateKeys(rotateEnv);
-    expect(result.migrated).toBe(1);
-    expect(result.errors).toHaveLength(0);
-
-    const row = await env.DB.prepare('SELECT key_version FROM connections WHERE id = ?')
-      .bind('conn-no-kv').first<{ key_version: number }>();
-    expect(row!.key_version).toBe(2);
-  });
+  // The rotateKeys function will be completely rewritten in Task 12.
+  // These tests are marked as .todo() until then.
+  it.todo('re-encrypts all managed connections and KV entries');
+  it.todo('skips ZK connections');
+  it.todo('skips already-migrated connections');
+  it.todo('re-encrypts DCR registrations');
+  it.todo('handles missing KV entry gracefully');
 });

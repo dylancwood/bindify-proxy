@@ -3,9 +3,12 @@ import { buildProxyCacheEntry, withProxyCache, deleteProxyCache, checkCachedAcce
 import { getManagedEncryptionKeys } from '../index';
 import type { Connection, User } from '@bindify/types';
 import { SELF, env } from 'cloudflare:test';
-import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey } from '../crypto';
+import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, computeKeyFingerprint } from '../crypto';
 import { makeFixedCredentials } from './test-helpers';
 import { processWebhookEvent } from '../billing/webhook';
+
+const TEST_MASTER_KEY = 'test-master-key-0123456789abcdef0123456789abcdef';
+let TEST_KEY_FINGERPRINT: string;
 
 // Helper schema for tests that need D1
 const SCHEMA = `
@@ -32,6 +35,7 @@ CREATE TABLE IF NOT EXISTS connections (
     dcr_registration TEXT,
     encrypted_tokens TEXT,
     key_version INTEGER NOT NULL DEFAULT 1,
+    key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
     last_used_at TEXT,
     last_refreshed_at TEXT,
@@ -72,27 +76,33 @@ CREATE INDEX IF NOT EXISTS idx_connection_events_lookup ON connection_events(con
 `;
 
 describe('buildProxyCacheEntry', () => {
-  const connection: Connection = {
-    id: 'conn-1',
-    user_id: 'user-1',
-    service: 'todoist' as any,
-    secret_url_segment_1: 'secret1abc',
-    status: 'active',
-    key_storage_mode: 'managed',
-    auth_type: 'oauth',
-    auth_mode: null,
-    application: null,
-    label: null,
-    dcr_registration: null,
-    encrypted_tokens: null,
-    key_version: 1,
-    needs_reauth_at: null,
-    suspended_at: null,
-    last_used_at: null,
-    last_refreshed_at: null,
-    metadata: null,
-    created_at: '2026-03-01T00:00:00Z',
-  };
+  let connection: Connection;
+
+  beforeAll(async () => {
+    TEST_KEY_FINGERPRINT = await computeKeyFingerprint(TEST_MASTER_KEY);
+    connection = {
+      id: 'conn-1',
+      user_id: 'user-1',
+      service: 'todoist' as any,
+      secret_url_segment_1: 'secret1abc',
+      status: 'active',
+      key_storage_mode: 'managed',
+      auth_type: 'oauth',
+      auth_mode: null,
+      application: null,
+      label: null,
+      dcr_registration: null,
+      encrypted_tokens: null,
+      key_version: 1,
+      key_fingerprint: TEST_KEY_FINGERPRINT,
+      needs_reauth_at: null,
+      suspended_at: null,
+      last_used_at: null,
+      last_refreshed_at: null,
+      metadata: null,
+      created_at: '2026-03-01T00:00:00Z',
+    };
+  });
 
   const user: User = {
     id: 'user-1',
@@ -168,7 +178,7 @@ describe('withProxyCache', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'managed',
-      keyVersion: 1,
+      keyFingerprint: '',
       dcrRegistration: null,
       needsReauthAt: null,
       encryptedTokens: 'some-encrypted-blob',
@@ -197,7 +207,7 @@ describe('withProxyCache', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'managed',
-      keyVersion: 1,
+      keyFingerprint: '',
       dcrRegistration: null,
       needsReauthAt: null,
       encryptedTokens: 'old-blob',
@@ -229,7 +239,7 @@ describe('withProxyCache', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'managed',
-      keyVersion: 1,
+      keyFingerprint: '',
       dcrRegistration: null,
       needsReauthAt: null,
       encryptedTokens: 'original-blob',
@@ -384,7 +394,7 @@ describe('decryptCacheTokens', () => {
     const entry = {
       authType: 'oauth' as const,
       keyStorageMode: 'zero_knowledge' as const,
-      keyVersion: 1,
+      keyFingerprint: '',
       connectionId: 'conn-zk',
       encryptedTokens: encrypted,
     } as any;
@@ -395,18 +405,20 @@ describe('decryptCacheTokens', () => {
 
   it('decrypts managed OAuth tokens with managed key', async () => {
     const tokens = { access_token: 'at-managed', refresh_token: 'rt-managed', expires_at: 9999999999 };
-    const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, 'conn-managed');
+    const managedKeys = await getManagedEncryptionKeys(env as any);
+    const activeKey = managedKeys[managedKeys.length - 1];
+    const key = await deriveManagedEncryptionKey(activeKey.key, 'conn-managed');
     const encrypted = await encryptTokenDataWithKey(JSON.stringify(tokens), key);
 
     const entry = {
       authType: 'oauth' as const,
       keyStorageMode: 'managed' as const,
-      keyVersion: 1,
+      keyFingerprint: activeKey.fingerprint,
       connectionId: 'conn-managed',
       encryptedTokens: encrypted,
     } as any;
 
-    const result = await decryptCacheTokens(entry, 'unused-secret2', await getManagedEncryptionKeys(env as any));
+    const result = await decryptCacheTokens(entry, 'unused-secret2', managedKeys);
     expect(result).toEqual(tokens);
   });
 
@@ -417,7 +429,7 @@ describe('decryptCacheTokens', () => {
     const entry = {
       authType: 'api_key' as const,
       keyStorageMode: 'zero_knowledge' as const,
-      keyVersion: 1,
+      keyFingerprint: '',
       connectionId: 'conn-api',
       encryptedTokens: encrypted,
     } as any;
@@ -456,7 +468,9 @@ describe('proxy cache integration', () => {
       refresh_token: 'test-rt-integration',
       expires_at: Math.floor(Date.now() / 1000) + 86400,
     };
-    const key = await deriveManagedEncryptionKey(env.MANAGED_ENCRYPTION_MASTER_KEY, INT_CONN_ID);
+    const managedKeys = await getManagedEncryptionKeys(env as any);
+    const activeKey = managedKeys[managedKeys.length - 1];
+    const key = await deriveManagedEncryptionKey(activeKey.key, INT_CONN_ID);
     const encrypted = await encryptTokenDataWithKey(JSON.stringify(tokens), key);
 
     const cacheEntry = {
@@ -469,7 +483,7 @@ describe('proxy cache integration', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'managed',
-      keyVersion: 1,
+      keyFingerprint: activeKey.fingerprint,
       dcrRegistration: null,
       needsReauthAt: null,
       encryptedTokens: encrypted,
@@ -568,7 +582,7 @@ describe('proxy cache integration', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'managed',
-      keyVersion: 1,
+      keyFingerprint: '',
       dcrRegistration: null,
       needsReauthAt: null,
       encryptedTokens: 'placeholder-encrypted',

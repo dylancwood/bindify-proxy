@@ -21,7 +21,8 @@ export interface Connection {
   label: string | null;
   dcr_registration: string | null;
   encrypted_tokens: string | null;
-  key_version: number;
+  key_version: number; // deprecated — kept because D1 still returns it; use key_fingerprint
+  key_fingerprint: string;
   needs_reauth_at: string | null;
   suspended_at: string | null;
   last_used_at: string | null;

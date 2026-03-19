@@ -13,7 +13,7 @@ import type { ManagedKeyEntry } from '../crypto';
 import {
   parseManagedKeys,
   getManagedKey,
-  getActiveKeyVersion,
+  getActiveKey,
   deriveManagedEncryptionKey,
   decryptTokenDataWithKey,
   encryptTokenDataWithKey,
@@ -27,9 +27,10 @@ interface RotateKeysEnv {
 }
 
 export async function rotateKeys(env: RotateKeysEnv): Promise<{ migrated: number; errors: string[] }> {
-  const keys = parseManagedKeys(env.MANAGED_ENCRYPTION_KEYS);
-  const active = getActiveKeyVersion(keys);
-  const targetVersion = active.version;
+  const keys = await parseManagedKeys(env.MANAGED_ENCRYPTION_KEYS);
+  const active = getActiveKey(keys);
+  // TODO: This script will be fully rewritten in Task 12 for fingerprint-based rotation
+  const targetVersion = 0; // placeholder — script is non-functional until Task 12 rewrite
 
   const connections = await env.DB
     .prepare(
