@@ -54,6 +54,7 @@ export interface Env {
   MCP_PROXY_RATE_LIMIT_PER_HOUR?: string;
   IP_ALLOWLIST?: string;
   BLOCKLIST_CACHE_TTL_MS?: string;
+  E2E_BYPASS_TOKEN?: string; // If set, requests with matching X-E2E-Bypass header skip bot detection
   CONFIG?: string;
   // Zoho Desk integration (optional — support endpoint returns 503 if not configured)
   ZOHO_CLIENT_ID?: string;
@@ -166,6 +167,11 @@ function maybeLog404(
   response: Response, path: string, ip: string,
   request: Request, ctx: ExecutionContext, env: Env
 ): Response {
+  // Skip 404 logging for E2E bypass requests — prevents CI runners from
+  // accumulating 404 events that would trigger bot detection blocks.
+  const e2eBypass = env.E2E_BYPASS_TOKEN
+    && request.headers.get('X-E2E-Bypass') === env.E2E_BYPASS_TOKEN;
+  if (e2eBypass) return response;
   if (response.status === 404 && path.startsWith('/mcp/') && response.headers.get('X-Bindify-Not-Found') === '1') {
     const urlSegment = path.replace(/^\/mcp\//, '');
     ctx.waitUntil(log404Event(env.DB, {
@@ -212,8 +218,10 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
     return new Response(null, { status: 204, headers: corsHeaders(env, request) });
   }
 
-  // Skip blocklist for allowlisted IPs
-  if (!isAllowlisted(allowlist, ip)) {
+  // Skip blocklist for E2E bypass token (CI environments) or allowlisted IPs
+  const e2eBypass = env.E2E_BYPASS_TOKEN
+    && request.headers.get('X-E2E-Bypass') === env.E2E_BYPASS_TOKEN;
+  if (!e2eBypass && !isAllowlisted(allowlist, ip)) {
     // Check in-memory cache first, then KV on miss
     let blocked = blocklistCache.get(ip);
     if (blocked === null) {
