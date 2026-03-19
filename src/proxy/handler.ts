@@ -15,6 +15,7 @@ import { handleAuthError } from './auth-errors';
 import { writeConnectionEvent } from '../db/connection-events';
 import { withProxyCache, checkCachedAccessActive, decryptCacheTokens, writeProxyCache } from './kv-cache';
 import type { ProxyCacheEntry } from './kv-cache';
+import { logPossibleBotEvent } from '../bot-detection/bot-events';
 import { parseConfig } from '../config';
 import { getManagedEncryptionKeys } from '../index';
 
@@ -534,7 +535,8 @@ async function resolveProxyAuth(
   env: Env,
   params: ProxyParams,
   ctx: ExecutionContext | null,
-  makeError: ProxyErrorFn
+  makeError: ProxyErrorFn,
+  request: Request
 ): Promise<{ auth: AuthResult; entry: ProxyCacheEntry } | Response> {
   const config = parseConfig(env.CONFIG);
 
@@ -590,7 +592,24 @@ async function resolveProxyAuth(
     return { auth, entry };
   });
 
-  if (!cacheResult) return makeError('not_found');
+  if (!cacheResult) {
+    const ip = request.headers.get('CF-Connecting-IP') || '';
+    const path = new URL(request.url).pathname;
+    const urlSegment = path.replace(/^\/mcp\//, '');
+    if (ctx) {
+      ctx.waitUntil(logPossibleBotEvent(env.DB, {
+        reason: 'invalid_credentials',
+        ip,
+        rawUrl: request.url,
+        urlSegment,
+        headers: request.headers,
+        cf: (request as any).cf,
+        e2eBypassToken: env.E2E_BYPASS_TOKEN,
+        e2eBypassHeader: request.headers.get('X-E2E-Bypass') ?? undefined,
+      }));
+    }
+    return makeError('not_found');
+  }
   if ('error' in cacheResult) return cacheResult.error;
 
   return cacheResult;
@@ -655,9 +674,25 @@ export async function handleProxySSE(request: Request, env: Env, ctx?: Execution
   if (!params) return new Response('Invalid proxy path', { status: 400 });
 
   const serviceDef = getService(params.service);
-  if (!serviceDef) return new Response('Unknown service', { status: 404 });
+  if (!serviceDef) {
+    const ip = request.headers.get('CF-Connecting-IP') || '';
+    const urlSegment = new URL(request.url).pathname.replace(/^\/mcp\//, '');
+    if (ctx) {
+      ctx.waitUntil(logPossibleBotEvent(env.DB, {
+        reason: 'unknown_service',
+        ip,
+        rawUrl: request.url,
+        urlSegment,
+        headers: request.headers,
+        cf: (request as any).cf,
+        e2eBypassToken: env.E2E_BYPASS_TOKEN,
+        e2eBypassHeader: request.headers.get('X-E2E-Bypass') ?? undefined,
+      }));
+    }
+    return new Response('Unknown service', { status: 404 });
+  }
 
-  const result = await resolveProxyAuth(env, params, ctx ?? null, sseErrorFn);
+  const result = await resolveProxyAuth(env, params, ctx ?? null, sseErrorFn, request);
   if (result instanceof Response) return result;
 
   const { auth, entry } = result;
@@ -770,6 +805,20 @@ export async function handleProxyMessages(request: Request, env: Env, ctx?: Exec
 
   const serviceDef = getService(params.service);
   if (!serviceDef) {
+    const ip = request.headers.get('CF-Connecting-IP') || '';
+    const urlSegment = new URL(request.url).pathname.replace(/^\/mcp\//, '');
+    if (ctx) {
+      ctx.waitUntil(logPossibleBotEvent(env.DB, {
+        reason: 'unknown_service',
+        ip,
+        rawUrl: request.url,
+        urlSegment,
+        headers: request.headers,
+        cf: (request as any).cf,
+        e2eBypassToken: env.E2E_BYPASS_TOKEN,
+        e2eBypassHeader: request.headers.get('X-E2E-Bypass') ?? undefined,
+      }));
+    }
     return jsonRpcError(null, -32006, 'Connection not found. Contact support@bindify.dev if you need help.', 404);
   }
 
@@ -786,7 +835,7 @@ export async function handleProxyMessages(request: Request, env: Env, ctx?: Exec
 
   const requestId = extractRequestId(healthCheck.body);
 
-  const result = await resolveProxyAuth(env, params, ctx ?? null, jsonRpcErrorFn(requestId));
+  const result = await resolveProxyAuth(env, params, ctx ?? null, jsonRpcErrorFn(requestId), request);
   if (result instanceof Response) return result;
 
   const { auth, entry } = result;
@@ -848,6 +897,20 @@ export async function handleProxyStreamableHTTP(request: Request, env: Env, ctx?
 
   const serviceDef = getService(params.service);
   if (!serviceDef) {
+    const ip = request.headers.get('CF-Connecting-IP') || '';
+    const urlSegment = new URL(request.url).pathname.replace(/^\/mcp\//, '');
+    if (ctx) {
+      ctx.waitUntil(logPossibleBotEvent(env.DB, {
+        reason: 'unknown_service',
+        ip,
+        rawUrl: request.url,
+        urlSegment,
+        headers: request.headers,
+        cf: (request as any).cf,
+        e2eBypassToken: env.E2E_BYPASS_TOKEN,
+        e2eBypassHeader: request.headers.get('X-E2E-Bypass') ?? undefined,
+      }));
+    }
     return jsonRpcError(null, -32006, 'Connection not found. Contact support@bindify.dev if you need help.', 404);
   }
 
@@ -871,7 +934,7 @@ export async function handleProxyStreamableHTTP(request: Request, env: Env, ctx?
   // For GET requests, preReadBody is undefined → extractRequestId returns null
   const requestId = extractRequestId(preReadBody);
 
-  const result = await resolveProxyAuth(env, params, ctx ?? null, jsonRpcErrorFn(requestId));
+  const result = await resolveProxyAuth(env, params, ctx ?? null, jsonRpcErrorFn(requestId), request);
   if (result instanceof Response) return result;
 
   const { auth, entry } = result;
