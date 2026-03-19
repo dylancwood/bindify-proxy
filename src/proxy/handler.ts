@@ -622,7 +622,7 @@ function schedulePostProxyTasks(
 
 function sseErrorFn(type: ProxyErrorType): Response {
   switch (type) {
-    case 'not_found': return new Response('Connection not found', { status: 404, headers: { 'X-Bindify-Not-Found': '1' } });
+    case 'not_found': return new Response('Connection not found', { status: 404 });
     case 'suspended': return new Response('Connection suspended — payment required', { status: 402 });
     case 'error': return new Response('Connection error — please re-authenticate', { status: 502 });
     case 'access_denied': return new Response('Access denied', { status: 403 });
@@ -634,11 +634,8 @@ function sseErrorFn(type: ProxyErrorType): Response {
 function jsonRpcErrorFn(requestId: string | number | null): ProxyErrorFn {
   return (type: ProxyErrorType): Response => {
     switch (type) {
-      case 'not_found': {
-        const resp = jsonRpcError(requestId, -32001, 'Connection not found — this URL may have been deactivated. Reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 404);
-        resp.headers.set('X-Bindify-Not-Found', '1');
-        return resp;
-      }
+      case 'not_found':
+        return jsonRpcError(requestId, -32001, 'Connection not found — this URL may have been deactivated. Reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 404);
       case 'suspended': return jsonRpcError(requestId, -32002, 'Connection suspended — payment required. Update billing at app.bindify.dev. Contact support@bindify.dev if you need help.', 402);
       case 'error': return jsonRpcError(requestId, -32003, 'Connection error — reconnect at app.bindify.dev to generate a new URL. Contact support@bindify.dev if you need help.', 502);
       case 'access_denied': return jsonRpcError(requestId, -32004, 'Access denied — update your plan at app.bindify.dev. Contact support@bindify.dev if you need help.', 403);
@@ -658,7 +655,7 @@ export async function handleProxySSE(request: Request, env: Env, ctx?: Execution
   if (!params) return new Response('Invalid proxy path', { status: 400 });
 
   const serviceDef = getService(params.service);
-  if (!serviceDef) return new Response('Unknown service', { status: 404, headers: { 'X-Bindify-Not-Found': '1' } });
+  if (!serviceDef) return new Response('Unknown service', { status: 404 });
 
   const result = await resolveProxyAuth(env, params, ctx ?? null, sseErrorFn);
   if (result instanceof Response) return result;
@@ -773,9 +770,7 @@ export async function handleProxyMessages(request: Request, env: Env, ctx?: Exec
 
   const serviceDef = getService(params.service);
   if (!serviceDef) {
-    const resp = jsonRpcError(null, -32006, 'Connection not found. Contact support@bindify.dev if you need help.', 404);
-    resp.headers.set('X-Bindify-Not-Found', '1');
-    return resp;
+    return jsonRpcError(null, -32006, 'Connection not found. Contact support@bindify.dev if you need help.', 404);
   }
 
   // Check for health check short-circuit
@@ -812,9 +807,7 @@ export async function handleProxyMessages(request: Request, env: Env, ctx?: Exec
 
   const upstreamMessageUrl = await env.KV.get(`upstream:${sessionId}`);
   if (!upstreamMessageUrl) {
-    const resp = jsonRpcError(requestId, -32001, 'Session not found — SSE connection may have expired. Contact support@bindify.dev if you need help.', 404);
-    resp.headers.set('X-Bindify-Not-Found', '1');
-    return resp;
+    return jsonRpcError(requestId, -32001, 'Session not found — SSE connection may have expired. Contact support@bindify.dev if you need help.', 404);
   }
 
   // Use pre-read body from health check if available, otherwise read fresh
@@ -855,9 +848,7 @@ export async function handleProxyStreamableHTTP(request: Request, env: Env, ctx?
 
   const serviceDef = getService(params.service);
   if (!serviceDef) {
-    const resp = jsonRpcError(null, -32006, 'Connection not found. Contact support@bindify.dev if you need help.', 404);
-    resp.headers.set('X-Bindify-Not-Found', '1');
-    return resp;
+    return jsonRpcError(null, -32006, 'Connection not found. Contact support@bindify.dev if you need help.', 404);
   }
 
   const method = request.method;
