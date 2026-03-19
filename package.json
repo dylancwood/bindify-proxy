@@ -8,7 +8,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "sync:secrets": "gh secret set WRANGLER_TOML < wrangler.toml && echo 'Synced wrangler.toml to GitHub secrets'"
+    "sync:secrets": "gh secret set WRANGLER_TOML < wrangler.toml && echo 'Synced wrangler.toml to GitHub secrets'",
+    "rotate-keys": "npx tsx src/scripts/rotate-keys.ts",
+    "generate-key": "npx tsx src/scripts/generate-key.ts"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.0",
