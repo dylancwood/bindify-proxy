@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
-import { log404Event, filterHeaders, extractSecretSegment } from '../bot-detection/log-404';
+import { logPossibleBotEvent, filterHeaders, extractSecretSegment } from '../bot-detection/bot-events';
 
 const VALID_CREDS = 'A'.repeat(86);
 const SHORT_CREDS = 'A'.repeat(40);
@@ -20,7 +20,8 @@ beforeAll(async () => {
       asn           TEXT,
       asn_org       TEXT,
       country       TEXT,
-      processed     INTEGER DEFAULT 0
+      processed     INTEGER DEFAULT 0,
+      reason        TEXT
     )
   `).run();
 });
@@ -95,9 +96,10 @@ describe('extractSecretSegment', () => {
   });
 });
 
-describe('log404Event', () => {
-  it('inserts a row into proxy_404_log', async () => {
-    await log404Event(env.DB, {
+describe('logPossibleBotEvent', () => {
+  it('inserts a row with reason into proxy_404_log', async () => {
+    await logPossibleBotEvent(env.DB, {
+      reason: 'invalid_credentials',
       ip: '1.2.3.4',
       rawUrl: 'http://api.bindify.dev/mcp/linear/abc/def',
       urlSegment: 'linear/abc/def',
@@ -118,15 +120,47 @@ describe('log404Event', () => {
     expect(row!.asn_org).toBe('TestOrg');
     expect(row!.country).toBe('US');
     expect(row!.processed).toBe(0);
+    expect(row!.reason).toBe('invalid_credentials');
 
     const headers = JSON.parse(row!.headers as string);
     expect(headers['user-agent']).toBe('scanner');
     expect(headers).not.toHaveProperty('authorization');
   });
 
+  it('stores each reason value correctly', async () => {
+    await logPossibleBotEvent(env.DB, {
+      reason: 'unknown_service',
+      ip: '2.2.2.2',
+      rawUrl: 'http://api.bindify.dev/mcp/unknown/abc',
+      urlSegment: 'unknown/abc',
+      headers: new Headers(),
+      cf: undefined,
+    });
+
+    await logPossibleBotEvent(env.DB, {
+      reason: 'route_not_found',
+      ip: '3.3.3.3',
+      rawUrl: 'http://api.bindify.dev/mcp/linear/abc',
+      urlSegment: 'linear/abc',
+      headers: new Headers(),
+      cf: undefined,
+    });
+
+    const row1 = await env.DB.prepare('SELECT reason FROM proxy_404_log WHERE ip = ?')
+      .bind('2.2.2.2')
+      .first();
+    expect(row1!.reason).toBe('unknown_service');
+
+    const row2 = await env.DB.prepare('SELECT reason FROM proxy_404_log WHERE ip = ?')
+      .bind('3.3.3.3')
+      .first();
+    expect(row2!.reason).toBe('route_not_found');
+  });
+
   it('stores full raw_url including credentials for enumeration detection', async () => {
     const rawUrl = `http://api.bindify.dev/mcp/linear/${VALID_CREDS}/sse`;
-    await log404Event(env.DB, {
+    await logPossibleBotEvent(env.DB, {
+      reason: 'invalid_credentials',
       ip: '10.0.0.1',
       rawUrl,
       urlSegment: `linear/${VALID_CREDS}/sse`,
@@ -143,7 +177,8 @@ describe('log404Event', () => {
   });
 
   it('handles undefined request.cf gracefully', async () => {
-    await log404Event(env.DB, {
+    await logPossibleBotEvent(env.DB, {
+      reason: 'invalid_credentials',
       ip: '5.6.7.8',
       rawUrl: 'http://api.bindify.dev/mcp/todoist/xyz',
       urlSegment: 'todoist/xyz',
@@ -159,5 +194,61 @@ describe('log404Event', () => {
     expect(row!.asn).toBeNull();
     expect(row!.asn_org).toBeNull();
     expect(row!.country).toBeNull();
+  });
+
+  it('skips logging when E2E bypass token matches', async () => {
+    await logPossibleBotEvent(env.DB, {
+      reason: 'invalid_credentials',
+      ip: '9.9.9.9',
+      rawUrl: 'http://api.bindify.dev/mcp/linear/abc',
+      urlSegment: 'linear/abc',
+      headers: new Headers({ 'x-e2e-bypass': 'secret-token' }),
+      cf: undefined,
+      e2eBypassToken: 'secret-token',
+      e2eBypassHeader: 'secret-token',
+    });
+
+    const row = await env.DB.prepare('SELECT * FROM proxy_404_log WHERE ip = ?')
+      .bind('9.9.9.9')
+      .first();
+
+    expect(row).toBeNull();
+  });
+
+  it('logs normally when E2E bypass token does not match', async () => {
+    await logPossibleBotEvent(env.DB, {
+      reason: 'invalid_credentials',
+      ip: '8.8.8.8',
+      rawUrl: 'http://api.bindify.dev/mcp/linear/abc',
+      urlSegment: 'linear/abc',
+      headers: new Headers(),
+      cf: undefined,
+      e2eBypassToken: 'secret-token',
+      e2eBypassHeader: 'wrong-token',
+    });
+
+    const row = await env.DB.prepare('SELECT * FROM proxy_404_log WHERE ip = ?')
+      .bind('8.8.8.8')
+      .first();
+
+    expect(row).not.toBeNull();
+  });
+
+  it('logs normally when E2E bypass token is undefined', async () => {
+    await logPossibleBotEvent(env.DB, {
+      reason: 'invalid_credentials',
+      ip: '7.7.7.7',
+      rawUrl: 'http://api.bindify.dev/mcp/linear/abc',
+      urlSegment: 'linear/abc',
+      headers: new Headers(),
+      cf: undefined,
+      e2eBypassToken: undefined,
+    });
+
+    const row = await env.DB.prepare('SELECT * FROM proxy_404_log WHERE ip = ?')
+      .bind('7.7.7.7')
+      .first();
+
+    expect(row).not.toBeNull();
   });
 });

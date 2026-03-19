@@ -29,21 +29,30 @@ export function extractSecretSegment(path: string): string | null {
   return match ? match[1] : null;
 }
 
-interface Log404Params {
+export type BotEventReason = 'invalid_credentials' | 'unknown_service' | 'route_not_found';
+
+interface BotEventParams {
+  reason: BotEventReason;
   ip: string;
   rawUrl: string;
   urlSegment: string;
   headers: Headers;
   cf: { asn?: number | string; asOrganization?: string; country?: string } | undefined;
+  e2eBypassToken?: string;
+  e2eBypassHeader?: string;
 }
 
-export async function log404Event(db: D1Database, params: Log404Params): Promise<void> {
+export async function logPossibleBotEvent(db: D1Database, params: BotEventParams): Promise<void> {
+  if (params.e2eBypassToken && params.e2eBypassHeader === params.e2eBypassToken) {
+    return;
+  }
+
   try {
     const filteredHeaders = filterHeaders(params.headers);
     const secretSegment = extractSecretSegment('/mcp/' + params.urlSegment);
     await db.prepare(`
-      INSERT INTO proxy_404_log (ip, raw_url, url_segment, secret_segment, headers, timestamp, asn, asn_org, country)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO proxy_404_log (ip, raw_url, url_segment, secret_segment, headers, timestamp, asn, asn_org, country, reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       params.ip,
       params.rawUrl,
@@ -54,8 +63,9 @@ export async function log404Event(db: D1Database, params: Log404Params): Promise
       params.cf?.asn?.toString() ?? null,
       params.cf?.asOrganization ?? null,
       params.cf?.country ?? null,
+      params.reason,
     ).run();
   } catch (err) {
-    log.error('Failed to log 404 event', err, { ip: params.ip, urlSegment: params.urlSegment });
+    log.error('Failed to log possible bot event', err, { ip: params.ip, reason: params.reason, urlSegment: params.urlSegment });
   }
 }
