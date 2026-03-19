@@ -17,7 +17,7 @@ import { processWebhookEvent, isHandledEvent } from './billing/webhook';
 import { getUserById } from './db/queries';
 import { cleanupStaleSuspendedConnections } from './cleanup';
 import { handleScheduledRefresh } from './scheduler';
-import { detectOrphanedFingerprints } from './rotation';
+import { detectOrphanedFingerprints, processRotationRequests } from './rotation';
 import { checkKvD1Consistency } from './consistency';
 import { handleGenerateNonce, handleSupportTicket } from './api/support';
 import { handleCspReport } from './api/csp-report';
@@ -680,6 +680,7 @@ export default {
         const keys = await getManagedEncryptionKeys(env);
         const fingerprints = keys.map((k) => k.fingerprint);
         await detectOrphanedFingerprints(env.DB, fingerprints, log);
+        await processRotationRequests(env.DB, env.KV, keys, log);
         break;
       }
       default:
