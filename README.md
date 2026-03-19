@@ -95,6 +95,41 @@ See [`.dev.vars.example`](.dev.vars.example) for the full list with descriptions
 | Email | `SMTP2GO_API_KEY`, `ADMIN_NOTIFICATION_EMAIL` | No |
 | Zoho Desk | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, etc. | No |
 
+## Encryption Key Rotation
+
+Managed-mode connections encrypt tokens with master keys identified by fingerprint (first 16 hex chars of SHA-256 of the key material). Rotate keys every **90 days** or after any personnel change with key access.
+
+### Standard Operating Procedure
+
+**Frequency:** Every 90 days, or immediately after:
+- Any team member with key access leaves the organization
+- A suspected key compromise
+- Any security incident involving the encryption infrastructure
+
+**Quick rotation:**
+```bash
+npm run rotate-keys -- --keys-file /secure/path/keys.json --env production
+```
+
+The script generates a new key (or uses one you've pre-added to `keys.json`), validates it against the live worker, updates the Cloudflare secret, and re-encrypts all managed connections. See the operator runbook in the monorepo at `docs/runbooks/key-rotation.md` for detailed steps and troubleshooting.
+
+**Key generation only:**
+```bash
+npm run generate-key
+```
+
+**How it works:**
+- Keys are stored in `MANAGED_ENCRYPTION_KEYS` as a JSON array: `[{"key":"<hex>"}]`
+- Each key's fingerprint is computed automatically (SHA-256 prefix)
+- The active key is the last entry in the array
+- The rotation script communicates with the worker via D1 — no public HTTP endpoints
+- The worker's cron handler validates every minute that all connection fingerprints have matching keys in config, logging errors for any orphaned fingerprints
+
+**Key removal** (after rotation completes and all connections have been re-encrypted):
+```bash
+npm run rotate-keys -- --keys-file /secure/path/keys.json --env production --remove <fingerprint>
+```
+
 ## Deployment
 
 This repo does **not** deploy directly. It is referenced as a git submodule in the private [bindify monorepo](https://github.com/dylancwood/bindify), which orchestrates all deployments to ensure correct ordering (migrations before code, coordinated with admin UI and other services).
