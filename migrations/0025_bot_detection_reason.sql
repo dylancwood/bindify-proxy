@@ -1,0 +1,1 @@
+ALTER TABLE proxy_404_log ADD COLUMN reason TEXT;
