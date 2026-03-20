@@ -260,21 +260,87 @@ describe('withProxyCache', () => {
     expect(unchanged.cachedAt).toBe('2026-01-01T00:00:00Z');
   });
 
-  it('treats unrecognized schema version as cache miss', async () => {
+  it('rebuilds from D1 on schema mismatch instead of deleting', async () => {
+    const userId = 'schema-mismatch-user';
+    const connId = 'conn-schema-mismatch';
+    const secret1 = 'secret1-old';
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO users (id, plan, trial_ends_at) VALUES (?, 'active', '2099-12-31T23:59:59Z')"
+    ).bind(userId).run();
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, encrypted_tokens)
+       VALUES (?, ?, 'linear', ?, 'active', 'managed', 'enc-tokens')`
+    ).bind(connId, userId, secret1).run();
+
     const entry = {
       schemaVersion: 999,
-      connectionId: 'conn-old',
-      encryptedTokens: 'blob',
+      connectionId: connId,
+      encryptedTokens: 'old-blob',
     };
-    await env.KV.put('proxy:secret1-old', JSON.stringify(entry));
+    await env.KV.put(`proxy:${secret1}`, JSON.stringify(entry));
 
-    const result = await withProxyCache(env as any, 'secret1-old', null, async (e, write) => {
+    const result = await withProxyCache(env as any, secret1, null, async (e, write) => {
       return e;
     });
+
+    expect(result).not.toBeNull();
+    expect(result!.connectionId).toBe(connId);
+    expect(result!.schemaVersion).toBe(PROXY_CACHE_SCHEMA_VERSION);
+    expect(result!.service).toBe('linear');
+
+    const raw = await env.KV.get(`proxy:${secret1}`);
+    const rebuilt = JSON.parse(raw!);
+    expect(rebuilt.schemaVersion).toBe(PROXY_CACHE_SCHEMA_VERSION);
+  });
+
+  it('returns null for tombstone (schema 0) without D1 fallback', async () => {
+    const secret1 = 'secret1-tomb-nofallback';
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO users (id, plan) VALUES ('tomb-user', 'active')"
+    ).run();
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode)
+       VALUES ('tomb-conn', 'tomb-user', 'linear', ?, 'active', 'managed')`
+    ).bind(secret1).run();
+
+    await env.KV.put(`proxy:${secret1}`, JSON.stringify({ schemaVersion: 0, deleted: true }));
+
+    const result = await withProxyCache(env as any, secret1, null, async (e, write) => e);
+    expect(result).toBeNull();
+  });
+
+  it('rebuilds from D1 on JSON parse error instead of deleting', async () => {
+    const userId = 'parse-err-user';
+    const connId = 'conn-parse-err';
+    const secret1 = 'secret1-parse-err';
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO users (id, plan) VALUES (?, 'active')"
+    ).bind(userId).run();
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, encrypted_tokens)
+       VALUES (?, ?, 'linear', ?, 'active', 'managed', 'enc-data')`
+    ).bind(connId, userId, secret1).run();
+
+    await env.KV.put(`proxy:${secret1}`, '{not valid json!!!');
+
+    const result = await withProxyCache(env as any, secret1, null, async (e, write) => e);
+
+    expect(result).not.toBeNull();
+    expect(result!.connectionId).toBe(connId);
+    expect(result!.schemaVersion).toBe(PROXY_CACHE_SCHEMA_VERSION);
+  });
+
+  it('returns null on schema mismatch when connection not in D1', async () => {
+    const secret1 = 'secret1-no-d1';
+
+    await env.KV.put(`proxy:${secret1}`, JSON.stringify({ schemaVersion: 999, connectionId: 'ghost' }));
+
+    const result = await withProxyCache(env as any, secret1, null, async (e, write) => e);
     expect(result).toBeNull();
 
-    const raw = await env.KV.get('proxy:secret1-old');
-    expect(raw).toBeNull();
+    // Old KV entry should NOT be deleted
+    const raw = await env.KV.get(`proxy:${secret1}`);
+    expect(raw).not.toBeNull();
   });
 });
 

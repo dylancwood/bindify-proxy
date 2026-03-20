@@ -6,6 +6,8 @@ import type { ManagedKeyEntry } from '../crypto';
 import { validateDecryptedTokens } from '../token-parsing';
 import { log } from '../logger';
 import { writeConnectionEvent } from '../db/connection-events';
+import { getConnectionWithUserBySecret1 } from '../db/queries';
+import { rebuildKvEntryFromRow } from './kv-rebuild';
 
 export const PROXY_CACHE_SCHEMA_VERSION = 3;
 
@@ -35,6 +37,16 @@ export interface ProxyCacheEntry {
   cachedAt: string;
 }
 
+async function rebuildFromD1(env: Env, secret1: string): Promise<ProxyCacheEntry | null> {
+  try {
+    const row = await getConnectionWithUserBySecret1(env.DB, secret1);
+    if (!row) return null;
+    return await rebuildKvEntryFromRow(env, secret1, row);
+  } catch {
+    return null;
+  }
+}
+
 export async function withProxyCache<T>(
   env: Env,
   secret1: string,
@@ -49,14 +61,22 @@ export async function withProxyCache<T>(
   try {
     entry = JSON.parse(raw);
   } catch {
-    await env.KV.delete(key);
+    // Corrupt JSON — attempt D1 rebuild instead of deleting
+    const rebuilt = await rebuildFromD1(env, secret1);
+    if (!rebuilt) return null;
+    entry = rebuilt;
+  }
+
+  // Tombstone: intentional delete, return null immediately
+  if (entry.schemaVersion === 0) {
     return null;
   }
 
-  // Schema version check
+  // Schema version mismatch: rebuild from D1 instead of deleting
   if (entry.schemaVersion !== PROXY_CACHE_SCHEMA_VERSION) {
-    await env.KV.delete(key);
-    return null;
+    const rebuilt = await rebuildFromD1(env, secret1);
+    if (!rebuilt) return null;
+    entry = rebuilt;
   }
 
   const write = async (opts?: { isTokenUpdate?: boolean }) => {
