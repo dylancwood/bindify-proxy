@@ -1,7 +1,9 @@
 import type { Connection, User } from '@bindify/types';
 import type { Env } from '../index';
+import { getManagedEncryptionKeys } from '../index';
 import type { ConnectionWithUserRow } from '../db/queries';
 import { buildProxyCacheEntry, writeProxyCache, type ProxyCacheEntry } from './kv-cache';
+import { getActiveKey } from '../crypto';
 
 export function rowToConnection(row: ConnectionWithUserRow): Connection {
   return {
@@ -50,6 +52,13 @@ export async function rebuildKvEntryFromRow(
   row: ConnectionWithUserRow,
 ): Promise<ProxyCacheEntry> {
   const connection = rowToConnection(row);
+
+  // If a managed connection has no fingerprint, use the active key's fingerprint
+  if (connection.key_storage_mode === 'managed' && !connection.key_fingerprint) {
+    const keys = await getManagedEncryptionKeys(env);
+    connection.key_fingerprint = getActiveKey(keys).fingerprint;
+  }
+
   const user = rowToUser(row);
   const entry = buildProxyCacheEntry(
     connection,
