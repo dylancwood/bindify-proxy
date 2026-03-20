@@ -682,6 +682,102 @@ describe('proxy cache integration', () => {
     expect(updated.subscriptionStatus).toBeNull(); // no active sub after deletion
     expect(updated.user.accessUntil).toBe(new Date(currentPeriodEnd * 1000).toISOString());
   });
+
+  it('proxy request succeeds when KV entry has old schema version (D1 fallback rebuild)', async () => {
+    const migUserId = 'mig-user-1';
+    const migConnId = 'mig-conn-1';
+    const migCreds = makeFixedCredentials(0x70, 0x71);
+    const migKeyFingerprint = await computeKeyFingerprint(TEST_MASTER_KEY);
+
+    // Set up D1 data
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO users (id, plan, trial_ends_at) VALUES (?, 'free_trial', '2099-12-31T23:59:59Z')"
+    ).bind(migUserId).run();
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, key_fingerprint)
+       VALUES (?, ?, 'linear', ?, 'active', 'managed', ?)`
+    ).bind(migConnId, migUserId, migCreds.secret1, migKeyFingerprint).run();
+
+    // Encrypt tokens and store in D1
+    const tokens = {
+      access_token: 'mig-at',
+      refresh_token: 'mig-rt',
+      expires_at: Math.floor(Date.now() / 1000) + 86400,
+    };
+    const managedKeys = await getManagedEncryptionKeys(env as any);
+    const activeKey = managedKeys[managedKeys.length - 1];
+    const key = await deriveManagedEncryptionKey(activeKey.key, migConnId);
+    const encrypted = await encryptTokenDataWithKey(JSON.stringify(tokens), key);
+
+    await env.DB.prepare(
+      'UPDATE connections SET encrypted_tokens = ?, key_fingerprint = ? WHERE id = ?'
+    ).bind(encrypted, activeKey.fingerprint, migConnId).run();
+
+    // Write a KV entry with OLD schema version (simulating pre-deploy state)
+    await env.KV.put(`proxy:${migCreds.secret1}`, JSON.stringify({
+      schemaVersion: PROXY_CACHE_SCHEMA_VERSION - 1,
+      connectionId: migConnId,
+      userId: migUserId,
+      service: 'linear',
+      status: 'active',
+      encryptedTokens: encrypted,
+    }));
+
+    // Mock upstream
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith('https://mcp.linear.app')) {
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: { tools: [] },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return originalFetch(input, init);
+    };
+
+    try {
+      const response = await SELF.fetch(`http://localhost/mcp/linear/${migCreds.credentials}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
+      });
+
+      // Should succeed — D1 fallback rebuilt the KV entry
+      expect(response.status).toBe(200);
+
+      // Verify KV was rebuilt with current schema
+      const kvRaw = await env.KV.get(`proxy:${migCreds.secret1}`);
+      const kvEntry = JSON.parse(kvRaw!);
+      expect(kvEntry.schemaVersion).toBe(PROXY_CACHE_SCHEMA_VERSION);
+      expect(kvEntry.connectionId).toBe(migConnId);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('tombstone is NOT affected by D1 fallback rebuild', async () => {
+    const tombCreds = makeFixedCredentials(0x72, 0x73);
+
+    // Write a tombstone (intentional delete)
+    await env.KV.put(`proxy:${tombCreds.secret1}`, JSON.stringify({ schemaVersion: 0, deleted: true }));
+
+    const response = await SELF.fetch(`http://localhost/mcp/linear/${tombCreds.credentials}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
+    });
+
+    // Should still 404 — tombstones are not rebuilt
+    expect(response.status).toBe(404);
+
+    // Tombstone should still be in KV
+    const raw = await env.KV.get(`proxy:${tombCreds.secret1}`);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.schemaVersion).toBe(0);
+  });
 });
 
 describe('getConnectionWithUserBySecret1', () => {
