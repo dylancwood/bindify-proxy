@@ -320,3 +320,57 @@ export async function acquireRefreshLock(
 export async function cleanupExpiredRefreshLocks(db: D1Database): Promise<void> {
   await db.prepare("DELETE FROM refresh_locks WHERE expires_at < datetime('now')").run();
 }
+
+export interface ConnectionWithUserRow {
+  // Connection fields
+  id: string;
+  user_id: string;
+  service: string;
+  secret_url_segment_1: string;
+  status: string;
+  key_storage_mode: 'managed' | 'zero_knowledge';
+  auth_type: 'oauth' | 'api_key';
+  auth_mode: string | null;
+  application: string | null;
+  label: string | null;
+  dcr_registration: string | null;
+  encrypted_tokens: string | null;
+  key_fingerprint: string;
+  needs_reauth_at: string | null;
+  last_used_at: string | null;
+  last_refreshed_at: string | null;
+  suspended_at: string | null;
+  metadata: string | null;
+  created_at: string;
+  // User fields (from JOIN)
+  plan: string;
+  trial_ends_at: string | null;
+  access_until: string | null;
+  // Subscription fields (from LEFT JOIN)
+  subscription_status: string | null;
+  subscription_past_due_since: string | null;
+}
+
+export async function getConnectionWithUserBySecret1(
+  db: D1Database,
+  secret1: string
+): Promise<ConnectionWithUserRow | null> {
+  return db
+    .prepare(
+      `WITH latest_subs AS (
+        SELECT s1.user_id, s1.status, s1.past_due_since
+        FROM subscriptions s1
+        WHERE s1.created_at = (
+          SELECT MAX(s2.created_at) FROM subscriptions s2 WHERE s2.user_id = s1.user_id
+        )
+      )
+      SELECT c.*, u.plan, u.trial_ends_at, u.access_until,
+             s.status AS subscription_status, s.past_due_since AS subscription_past_due_since
+      FROM connections c
+      JOIN users u ON c.user_id = u.id
+      LEFT JOIN latest_subs s ON c.user_id = s.user_id
+      WHERE c.secret_url_segment_1 = ?`
+    )
+    .bind(secret1)
+    .first<ConnectionWithUserRow>();
+}

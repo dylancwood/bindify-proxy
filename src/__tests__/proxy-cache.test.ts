@@ -6,6 +6,7 @@ import { SELF, env } from 'cloudflare:test';
 import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, computeKeyFingerprint } from '../crypto';
 import { makeFixedCredentials } from './test-helpers';
 import { processWebhookEvent } from '../billing/webhook';
+import { getConnectionWithUserBySecret1 } from '../db/queries';
 
 const TEST_MASTER_KEY = 'test-master-key-0123456789abcdef0123456789abcdef';
 let TEST_KEY_FINGERPRINT: string;
@@ -552,6 +553,7 @@ describe('proxy cache integration', () => {
     expect(response.status).toBe(404);
   });
 
+
   it('webhook billing change updates cache immediately', async () => {
     // Set up user with stripe_customer_id + subscription + connection + cache entry
     const whUserId = 'wh-cache-user';
@@ -613,5 +615,67 @@ describe('proxy cache integration', () => {
     expect(updated.user.plan).toBe('canceled');
     expect(updated.subscriptionStatus).toBeNull(); // no active sub after deletion
     expect(updated.user.accessUntil).toBe(new Date(currentPeriodEnd * 1000).toISOString());
+  });
+});
+
+describe('getConnectionWithUserBySecret1', () => {
+  beforeAll(async () => {
+    const statements = SCHEMA.split(';').map(s => s.trim()).filter(s => s.length > 0);
+    for (const statement of statements) {
+      await env.DB.prepare(statement).run();
+    }
+  });
+
+  it('returns connection with user and subscription data in one query', async () => {
+    const userId = 'q-user-1';
+    const connId = 'q-conn-1';
+    const secret1 = 'q-secret-1';
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO users (id, plan, trial_ends_at) VALUES (?, 'active', '2099-12-31T23:59:59Z')"
+    ).bind(userId).run();
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, encrypted_tokens, key_fingerprint)
+       VALUES (?, ?, 'linear', ?, 'active', 'managed', 'enc-data', 'fp-1')`
+    ).bind(connId, userId, secret1).run();
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO subscriptions (id, user_id, quantity, status, current_period_end) VALUES ('sub-q1', ?, 1, 'active', '2099-12-31T23:59:59Z')"
+    ).bind(userId).run();
+
+    const row = await getConnectionWithUserBySecret1(env.DB, secret1);
+
+    expect(row).not.toBeNull();
+    expect(row!.id).toBe(connId);
+    expect(row!.user_id).toBe(userId);
+    expect(row!.service).toBe('linear');
+    expect(row!.key_fingerprint).toBe('fp-1');
+    expect(row!.encrypted_tokens).toBe('enc-data');
+    expect(row!.plan).toBe('active');
+    expect(row!.trial_ends_at).toBe('2099-12-31T23:59:59Z');
+    expect(row!.subscription_status).toBe('active');
+  });
+
+  it('returns null for nonexistent secret1', async () => {
+    const row = await getConnectionWithUserBySecret1(env.DB, 'nonexistent-secret');
+    expect(row).toBeNull();
+  });
+
+  it('returns null subscription fields when no subscription exists', async () => {
+    const userId = 'q-user-nosub';
+    const connId = 'q-conn-nosub';
+    const secret1 = 'q-secret-nosub';
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO users (id, plan, trial_ends_at) VALUES (?, 'free_trial', '2099-12-31T23:59:59Z')"
+    ).bind(userId).run();
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode)
+       VALUES (?, ?, 'linear', ?, 'active', 'managed')`
+    ).bind(connId, userId, secret1).run();
+
+    const row = await getConnectionWithUserBySecret1(env.DB, secret1);
+
+    expect(row).not.toBeNull();
+    expect(row!.id).toBe(connId);
+    expect(row!.subscription_status).toBeNull();
+    expect(row!.subscription_past_due_since).toBeNull();
   });
 });
