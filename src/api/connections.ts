@@ -106,12 +106,32 @@ export async function handleAuthorize(
   // Use custom buildAuthUrl if provided
   if (serviceDef.overrides?.buildAuthUrl) {
     const customUrl = serviceDef.overrides.buildAuthUrl(config, Object.fromEntries(authUrl.searchParams));
+    log.info('OAuth authorization request (custom buildAuthUrl)', {
+      handler: 'handleAuthorize',
+      serviceId,
+      authorizationUrl: customUrl,
+      clientId,
+      scopes,
+      usePKCE: config.usePKCE ?? false,
+      useDCR: config.useDCR ?? false,
+    });
     await env.KV.put(`oauth:${state}`, JSON.stringify(pkceState), { expirationTtl: 600 });
     return Response.json({ url: customUrl });
   }
 
+  const finalAuthUrl = authUrl.toString();
+  log.info('OAuth authorization request', {
+    handler: 'handleAuthorize',
+    serviceId,
+    authorizationUrl: finalAuthUrl,
+    clientId,
+    scopes,
+    usePKCE: config.usePKCE ?? false,
+    useDCR: config.useDCR ?? false,
+  });
+
   await env.KV.put(`oauth:${state}`, JSON.stringify(pkceState), { expirationTtl: 600 });
-  return Response.json({ url: authUrl.toString() });
+  return Response.json({ url: finalAuthUrl });
 }
 
 export async function handleCallback(
@@ -172,25 +192,47 @@ export async function handleCallback(
     tokenBody.set('client_secret', clientSecret);
   }
 
+  const tokenRequestHeaders = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
+  const tokenRequestBody = tokenBody.toString();
+
+  log.info('OAuth token exchange request', {
+    handler: 'handleCallback',
+    serviceId: pkceState.serviceId,
+    tokenUrl: config.tokenUrl,
+    requestHeaders: tokenRequestHeaders,
+    requestBodyKeys: Array.from(tokenBody.keys()),
+    requestBody: tokenRequestBody,
+  });
+
   const tokenResponse = await fetch(config.tokenUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-    body: tokenBody.toString(),
+    headers: tokenRequestHeaders,
+    body: tokenRequestBody,
+  });
+
+  const rawBody = await tokenResponse.text();
+  const contentType = tokenResponse.headers.get('content-type');
+  const responseHeaders: Record<string, string> = {};
+  tokenResponse.headers.forEach((v, k) => { responseHeaders[k] = v; });
+
+  log.info('OAuth token exchange response', {
+    handler: 'handleCallback',
+    serviceId: pkceState.serviceId,
+    status: tokenResponse.status,
+    responseHeaders,
+    contentType,
+    rawBody,
   });
 
   if (!tokenResponse.ok) {
-    const text = await tokenResponse.text();
     log.error('OAuth token exchange failed', undefined, {
       handler: 'handleCallback',
       serviceId: pkceState.serviceId,
       status: tokenResponse.status,
-      body: text,
+      body: rawBody,
     });
     return new Response('Token exchange failed', { status: 502 });
   }
-
-  const rawBody = await tokenResponse.text();
-  const contentType = tokenResponse.headers.get('content-type');
 
   const tokenData = parseTokenResponseBody(rawBody, contentType);
 
