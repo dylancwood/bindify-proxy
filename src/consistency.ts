@@ -1,6 +1,7 @@
 import type { Env } from './index';
-import type { Connection, User } from '@bindify/types';
-import { buildProxyCacheEntry, writeProxyCache, PROXY_CACHE_SCHEMA_VERSION, type ProxyCacheEntry } from './proxy/kv-cache';
+import { PROXY_CACHE_SCHEMA_VERSION, type ProxyCacheEntry } from './proxy/kv-cache';
+import { rebuildKvEntryFromRow } from './proxy/kv-rebuild';
+import type { ConnectionWithUserRow } from './db/queries';
 import { insertAnomalyReport, hasUnacknowledgedAnomaly } from './db/anomaly-reports';
 import { REFRESH_CONFIG } from './services/refresh-config';
 import { log } from './logger';
@@ -11,41 +12,11 @@ export interface ConsistencyCheckResult {
   unrectifiable: number;
 }
 
-interface ConnectionRow {
-  // Connection fields
-  id: string;
-  user_id: string;
-  service: string;
-  secret_url_segment_1: string;
-  status: string;
-  key_storage_mode: 'managed' | 'zero_knowledge';
-  auth_type: 'oauth' | 'api_key';
-  auth_mode: string | null;
-  application: string | null;
-  label: string | null;
-  dcr_registration: string | null;
-  encrypted_tokens: string | null;
-  key_fingerprint: string;
-  needs_reauth_at: string | null;
-  last_used_at: string | null;
-  last_refreshed_at: string | null;
-  suspended_at: string | null;
-  metadata: string | null;
-  created_at: string;
-  // User fields (from JOIN)
-  plan: string;
-  trial_ends_at: string | null;
-  access_until: string | null;
-  // Subscription fields (from JOIN)
-  subscription_status: string | null;
-  subscription_past_due_since: string | null;
-}
-
 /** Fields to compare between KV cache and D1. */
 const COMPARISON_FIELDS: Array<{
   kvField: string;
   kvPath?: string[];
-  d1Field: keyof ConnectionRow;
+  d1Field: keyof ConnectionWithUserRow;
 }> = [
   { kvField: 'connectionId', d1Field: 'id' },
   { kvField: 'status', d1Field: 'status' },
@@ -75,44 +46,7 @@ function getKvValue(entry: ProxyCacheEntry, field: typeof COMPARISON_FIELDS[numb
   return (entry as any)[field.kvField] ?? null;
 }
 
-function rowToConnection(row: ConnectionRow): Connection {
-  return {
-    id: row.id,
-    user_id: row.user_id,
-    service: row.service as Connection['service'],
-    secret_url_segment_1: row.secret_url_segment_1,
-    status: row.status as Connection['status'],
-    key_storage_mode: row.key_storage_mode,
-    auth_type: row.auth_type,
-    auth_mode: row.auth_mode,
-    application: row.application,
-    label: row.label,
-    dcr_registration: row.dcr_registration,
-    encrypted_tokens: row.encrypted_tokens,
-    key_version: 0, // deprecated — D1 column still exists but ignored
-    key_fingerprint: row.key_fingerprint,
-    needs_reauth_at: row.needs_reauth_at,
-    last_used_at: row.last_used_at,
-    last_refreshed_at: row.last_refreshed_at,
-    suspended_at: row.suspended_at,
-    metadata: row.metadata,
-    created_at: row.created_at,
-  };
-}
-
-function rowToUser(row: ConnectionRow): User {
-  return {
-    id: row.user_id,
-    stripe_customer_id: null,
-    plan: row.plan as User['plan'],
-    trial_ends_at: row.trial_ends_at,
-    access_until: row.access_until,
-    email: null,
-    created_at: '',
-  };
-}
-
-function isKvMismatch(entry: ProxyCacheEntry, row: ConnectionRow): boolean {
+function isKvMismatch(entry: ProxyCacheEntry, row: ConnectionWithUserRow): boolean {
   for (const field of COMPARISON_FIELDS) {
     const kvVal = getKvValue(entry, field);
     const d1Val = row[field.d1Field] ?? null;
@@ -154,7 +88,7 @@ export async function checkKvD1Consistency(env: Env): Promise<ConsistencyCheckRe
     WHERE c.status IN ('active', 'suspended')
   `;
 
-  const rows = await env.DB.prepare(query).all<ConnectionRow>();
+  const rows = await env.DB.prepare(query).all<ConnectionWithUserRow>();
   const connections = rows.results;
   result.checked = connections.length;
 
@@ -213,16 +147,7 @@ export async function checkKvD1Consistency(env: Env): Promise<ConsistencyCheckRe
           // Can't rebuild without tokens — already reported as corrupted_tokens above
           continue;
         }
-        const connection = rowToConnection(row);
-        const user = rowToUser(row);
-        const entry = buildProxyCacheEntry(
-          connection,
-          user,
-          row.subscription_status,
-          row.subscription_past_due_since,
-          row.encrypted_tokens ?? '',
-        );
-        await writeProxyCache(env, row.secret_url_segment_1, entry);
+        await rebuildKvEntryFromRow(env, row.secret_url_segment_1, row);
         await reportAnomaly(env.DB, row.id, 'missing_kv_cache', true, 'KV cache was missing, rebuilt from D1');
         result.rectified++;
         continue;
@@ -233,16 +158,7 @@ export async function checkKvD1Consistency(env: Env): Promise<ConsistencyCheckRe
         entry = JSON.parse(raw);
       } catch {
         // Corrupted KV — rebuild
-        const connection = rowToConnection(row);
-        const user = rowToUser(row);
-        const rebuilt = buildProxyCacheEntry(
-          connection,
-          user,
-          row.subscription_status,
-          row.subscription_past_due_since,
-          row.encrypted_tokens ?? '',
-        );
-        await writeProxyCache(env, row.secret_url_segment_1, rebuilt);
+        await rebuildKvEntryFromRow(env, row.secret_url_segment_1, row);
         await reportAnomaly(env.DB, row.id, 'stale_kv_data', true, 'KV cache was corrupted, rebuilt from D1');
         result.rectified++;
         continue;
@@ -253,16 +169,7 @@ export async function checkKvD1Consistency(env: Env): Promise<ConsistencyCheckRe
         if (row.key_storage_mode === 'managed' && (!row.encrypted_tokens || row.encrypted_tokens === '')) {
           continue;
         }
-        const connection = rowToConnection(row);
-        const user = rowToUser(row);
-        const rebuilt = buildProxyCacheEntry(
-          connection,
-          user,
-          row.subscription_status,
-          row.subscription_past_due_since,
-          row.encrypted_tokens ?? '',
-        );
-        await writeProxyCache(env, row.secret_url_segment_1, rebuilt);
+        await rebuildKvEntryFromRow(env, row.secret_url_segment_1, row);
         await reportAnomaly(env.DB, row.id, 'stale_kv_data', true, 'KV had tombstone for active connection, rebuilt from D1');
         result.rectified++;
         continue;
@@ -273,16 +180,7 @@ export async function checkKvD1Consistency(env: Env): Promise<ConsistencyCheckRe
         if (row.key_storage_mode === 'managed' && (!row.encrypted_tokens || row.encrypted_tokens === '')) {
           continue;
         }
-        const connection = rowToConnection(row);
-        const user = rowToUser(row);
-        const rebuilt = buildProxyCacheEntry(
-          connection,
-          user,
-          row.subscription_status,
-          row.subscription_past_due_since,
-          row.encrypted_tokens ?? '',
-        );
-        await writeProxyCache(env, row.secret_url_segment_1, rebuilt);
+        await rebuildKvEntryFromRow(env, row.secret_url_segment_1, row);
         await reportAnomaly(env.DB, row.id, 'stale_kv_data', true, 'KV cache was stale, rebuilt from D1');
         result.rectified++;
       }
