@@ -214,6 +214,33 @@ describe('keepaliveDCRRegistrations', () => {
       .bind('conn-no-dcr').first<{ needs_reauth_at: string | null }>();
     expect(conn!.needs_reauth_at).toBeNull();
   });
+
+  it('skips zero_knowledge connections with DCR registrations (BIN-368)', async () => {
+    // ZK connections have DCR registrations encrypted with managed keys,
+    // but keepaliveDCRRegistrations should only process managed connections
+    const keys = await getManagedEncryptionKeys(env as any);
+    const activeKey = keys[keys.length - 1];
+    const regJson = JSON.stringify({
+      client_id: 'zk-dcr-client',
+      registration_client_uri: 'https://mcp.notion.com/register/zk-dcr-client',
+    });
+    const encKey = await deriveManagedEncryptionKey(activeKey.key, 'conn-zk-dcr');
+    const encReg = await encryptTokenDataWithKey(regJson, encKey);
+
+    await createConnection(env.DB, {
+      id: 'conn-zk-dcr', user_id: 'user1', service: 'notion', secret_url_segment_1: 'secret-zk-dcr',
+      status: 'active', key_storage_mode: 'zero_knowledge',
+      auth_type: 'oauth', auth_mode: null, application: null,
+      dcr_registration: encReg, encrypted_tokens: null, needs_reauth_at: null,
+      key_fingerprint: activeKey.fingerprint,
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await keepaliveDCRRegistrations(env);
+
+    // ZK connection should be completely skipped — no fetch calls
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe('refreshManagedConnection failure handling', () => {

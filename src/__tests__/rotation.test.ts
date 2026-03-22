@@ -445,6 +445,82 @@ describe('processRotationRequests - migration phase', () => {
     expect(JSON.parse(kvDecryptedDcr).client_secret).toBe('dcr-secret');
   });
 
+  it('re-encrypts DCR registrations for zero_knowledge connections (BIN-368)', async () => {
+    // ZK connections store DCR registrations encrypted with managed keys
+    // but encrypted_tokens with user's secret2. Only DCR should be rotated.
+    const dcrData = JSON.stringify({ client_id: 'zk-dcr-client', client_secret: 'zk-dcr-secret' });
+    const cryptoKeyV1 = await deriveManagedEncryptionKey(MASTER_KEY_V1, 'conn-zk-dcr');
+    const encDcr = await encryptTokenDataWithKey(dcrData, cryptoKeyV1);
+
+    // Insert as zero_knowledge connection with DCR registration
+    await env.DB
+      .prepare(
+        `INSERT INTO connections (id, user_id, service, secret_url_segment_1, key_storage_mode, key_fingerprint, encrypted_tokens, dcr_registration)
+         VALUES ('conn-zk-dcr', 'user1', 'notion', 'secret-zk-dcr', 'zero_knowledge', ?, 'zk-user-encrypted-tokens', ?)`
+      )
+      .bind(FP_V1, encDcr)
+      .run();
+
+    // Write KV entry
+    await env.KV.put('proxy:secret-zk-dcr', JSON.stringify({
+      schemaVersion: PROXY_CACHE_SCHEMA_VERSION,
+      connectionId: 'conn-zk-dcr',
+      userId: 'user1',
+      service: 'notion',
+      status: 'active',
+      authType: 'oauth',
+      authMode: null,
+      application: null,
+      keyStorageMode: 'zero_knowledge',
+      keyFingerprint: FP_V1,
+      dcrRegistration: encDcr,
+      needsReauthAt: null,
+      encryptedTokens: 'zk-user-encrypted-tokens',
+      user: { plan: 'free_trial', trialEndsAt: '2099-12-31T23:59:59Z', accessUntil: null },
+      subscriptionStatus: null,
+      subscriptionPastDueSince: null,
+      cachedAt: new Date().toISOString(),
+    }));
+
+    // Trigger migration
+    await env.DB
+      .prepare(
+        "INSERT INTO pending_key_rotations (expected_fingerprints, new_key_hex, new_key_fingerprint, status) VALUES (?, ?, ?, 'migrate')"
+      )
+      .bind(JSON.stringify([FP_V1, FP_V2]), MASTER_KEY_V2, FP_V2)
+      .run();
+
+    await processRotationRequests(env.DB, env.KV, KEYS_V1_V2, logger);
+
+    // Verify D1: DCR re-encrypted, key_fingerprint updated
+    const conn = await env.DB.prepare('SELECT * FROM connections WHERE id = ?').bind('conn-zk-dcr').first<any>();
+    expect(conn.key_fingerprint).toBe(FP_V2);
+    expect(conn.key_storage_mode).toBe('zero_knowledge');
+    // encrypted_tokens should NOT have been changed (ZK uses user's secret2)
+    expect(conn.encrypted_tokens).toBe('zk-user-encrypted-tokens');
+    // DCR registration should be re-encrypted with new key
+    const newCryptoKey = await deriveManagedEncryptionKey(MASTER_KEY_V2, 'conn-zk-dcr');
+    const decryptedDcr = await decryptTokenDataWithKey(conn.dcr_registration, newCryptoKey);
+    expect(JSON.parse(decryptedDcr).client_id).toBe('zk-dcr-client');
+
+    // Verify KV updated
+    const kvRaw = await env.KV.get('proxy:secret-zk-dcr');
+    const kvEntry = JSON.parse(kvRaw!);
+    expect(kvEntry.keyFingerprint).toBe(FP_V2);
+    expect(kvEntry.keyStorageMode).toBe('zero_knowledge');
+    // KV encrypted_tokens should be unchanged
+    expect(kvEntry.encryptedTokens).toBe('zk-user-encrypted-tokens');
+    // KV DCR should be re-encrypted
+    const kvDecryptedDcr = await decryptTokenDataWithKey(kvEntry.dcrRegistration, newCryptoKey);
+    expect(JSON.parse(kvDecryptedDcr).client_secret).toBe('zk-dcr-secret');
+
+    // Rotation should report success
+    const rotRow = await env.DB.prepare('SELECT * FROM pending_key_rotations LIMIT 1').first<any>();
+    expect(rotRow.status).toBe('completed');
+    const result = JSON.parse(rotRow.result);
+    expect(result.migrated).toBeGreaterThanOrEqual(1);
+  });
+
   it('scrubs new_key_hex after completion', async () => {
     await env.DB
       .prepare(
