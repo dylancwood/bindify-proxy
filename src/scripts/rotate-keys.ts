@@ -120,7 +120,7 @@ async function handleRemove(args: CliArgs): Promise<void> {
 
   // Query connection count for this fingerprint
   const countOutput = execWranglerD1(
-    `SELECT COUNT(*) as cnt FROM connections WHERE key_storage_mode = 'managed' AND key_fingerprint = '${fingerprint}'`,
+    `SELECT COUNT(*) as cnt FROM connections WHERE managed_key_fingerprint = '${fingerprint}'`,
     dbName,
     env
   );
@@ -220,11 +220,11 @@ async function handleRotation(args: CliArgs): Promise<void> {
 
   // Step 3: Get remote fingerprints
   const remoteFpOutput = execWranglerD1(
-    "SELECT DISTINCT key_fingerprint FROM connections WHERE key_storage_mode = 'managed' AND key_fingerprint != ''",
+    "SELECT DISTINCT fp FROM (SELECT managed_key_fingerprint AS fp FROM connections WHERE managed_key_fingerprint != '' UNION SELECT dcr_key_fingerprint AS fp FROM connections WHERE dcr_key_fingerprint != '')",
     dbName,
     env
   );
-  const remoteFingerprints = parseD1Result(remoteFpOutput).map((r: any) => r.key_fingerprint as string);
+  const remoteFingerprints = parseD1Result(remoteFpOutput).map((r: any) => r.fp as string);
 
   console.log(`Remote fingerprints (${remoteFingerprints.length}):`);
   for (const fp of remoteFingerprints) {
