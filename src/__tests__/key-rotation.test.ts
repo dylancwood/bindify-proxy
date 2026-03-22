@@ -7,6 +7,7 @@ import {
   parseManagedKeys,
   getManagedKey,
   getActiveKey,
+  getManagedKeyWithFallback,
   computeKeyFingerprint,
 } from '../crypto';
 import { decryptCacheTokens, PROXY_CACHE_SCHEMA_VERSION } from '../proxy/kv-cache';
@@ -48,6 +49,8 @@ CREATE TABLE IF NOT EXISTS connections (
     encrypted_tokens TEXT,
     key_version INTEGER NOT NULL DEFAULT 1,
     key_fingerprint TEXT NOT NULL DEFAULT '',
+    managed_key_fingerprint TEXT NOT NULL DEFAULT '',
+    dcr_key_fingerprint TEXT NOT NULL DEFAULT '',
     needs_reauth_at TEXT,
     last_used_at TEXT,
     last_refreshed_at TEXT,
@@ -82,7 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_connection_events_connection_id ON connection_eve
 CREATE INDEX IF NOT EXISTS idx_connection_events_lookup ON connection_events(connection_id, event_type, category, created_at);
 `;
 
-function makeCacheEntry(connectionId: string, encryptedTokens: string, opts?: { keyFingerprint?: string; keyStorageMode?: 'managed' | 'zero_knowledge' }): ProxyCacheEntry {
+function makeCacheEntry(connectionId: string, encryptedTokens: string, opts?: { managedKeyFingerprint?: string; dcrKeyFingerprint?: string; keyStorageMode?: 'managed' | 'zero_knowledge' }): ProxyCacheEntry {
   return {
     schemaVersion: PROXY_CACHE_SCHEMA_VERSION,
     connectionId,
@@ -93,7 +96,8 @@ function makeCacheEntry(connectionId: string, encryptedTokens: string, opts?: { 
     authMode: null,
     application: null,
     keyStorageMode: opts?.keyStorageMode ?? 'managed',
-    keyFingerprint: opts?.keyFingerprint ?? FP_V1,
+    managedKeyFingerprint: opts?.managedKeyFingerprint ?? FP_V1,
+    dcrKeyFingerprint: opts?.dcrKeyFingerprint ?? '',
     dcrRegistration: null,
     needsReauthAt: null,
     encryptedTokens,
@@ -146,7 +150,7 @@ describe('decryptCacheTokens with fingerprint-based keys', () => {
     const data = JSON.stringify({ access_token: 'tok-v1', refresh_token: 'ref', expires_at: 9999 });
     const encrypted = await encryptTokenDataWithKey(data, key);
 
-    const entry = makeCacheEntry('conn-cache-v1', encrypted, { keyFingerprint: FP_V1 });
+    const entry = makeCacheEntry('conn-cache-v1', encrypted, { managedKeyFingerprint: FP_V1 });
     const result = await decryptCacheTokens(entry, 'unused', KEYS_V1_V2);
     expect((result as any).access_token).toBe('tok-v1');
   });
@@ -156,7 +160,7 @@ describe('decryptCacheTokens with fingerprint-based keys', () => {
     const data = JSON.stringify({ access_token: 'tok-v2', refresh_token: 'ref', expires_at: 9999 });
     const encrypted = await encryptTokenDataWithKey(data, key);
 
-    const entry = makeCacheEntry('conn-cache-v2', encrypted, { keyFingerprint: FP_V2 });
+    const entry = makeCacheEntry('conn-cache-v2', encrypted, { managedKeyFingerprint: FP_V2 });
     const result = await decryptCacheTokens(entry, 'unused', KEYS_V1_V2);
     expect((result as any).access_token).toBe('tok-v2');
   });
@@ -177,6 +181,23 @@ describe('Multi-key backward compatibility', () => {
 
     const active = getActiveKey(KEYS_V1_V2);
     expect(active.fingerprint).toBe(FP_V2);
+  });
+});
+
+describe('getManagedKeyWithFallback', () => {
+  it('returns the matching key when fingerprint is found', () => {
+    const result = getManagedKeyWithFallback(KEYS_V1_V2, FP_V1, 'conn-1');
+    expect(result).toBe(MASTER_KEY_V1);
+  });
+
+  it('returns active key with WARN when fingerprint is not found', () => {
+    const result = getManagedKeyWithFallback(KEYS_V1_V2, 'fp-unknown', 'conn-2');
+    expect(result).toBe(MASTER_KEY_V2);
+  });
+
+  it('returns active key with WARN when fingerprint is empty', () => {
+    const result = getManagedKeyWithFallback(KEYS_V1_V2, '', 'conn-3');
+    expect(result).toBe(MASTER_KEY_V2);
   });
 });
 

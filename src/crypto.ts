@@ -1,4 +1,5 @@
 // src/crypto.ts
+import { log } from './logger';
 
 /** 10 years in seconds — used as expiry for tokens that don't expire */
 export const PERMANENT_TOKEN_EXPIRY_SECONDS = 315_360_000;
@@ -222,4 +223,18 @@ export function getManagedKey(keys: ManagedKeyEntry[], fingerprint: string): str
 
 export function getActiveKey(keys: ManagedKeyEntry[]): ManagedKeyEntry {
   return keys[keys.length - 1];
+}
+
+export function getManagedKeyWithFallback(keys: ManagedKeyEntry[], fingerprint: string, connectionId: string): string {
+  if (fingerprint) {
+    const entry = keys.find((k) => k.fingerprint === fingerprint);
+    if (entry) return entry.key;
+  }
+  const active = getActiveKey(keys);
+  log.warn('Managed key fingerprint not found, falling back to active key', {
+    fingerprint,
+    connectionId,
+    activeFingerprint: active.fingerprint,
+  });
+  return active.key;
 }
