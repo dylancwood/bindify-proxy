@@ -383,7 +383,7 @@ export async function keepaliveDCRRegistrations(env: Env): Promise<void> {
     const dcrConnections = await env.DB
       .prepare(`
         SELECT id, dcr_registration, secret_url_segment_1, key_fingerprint FROM connections
-        WHERE service = ? AND status = 'active' AND dcr_registration IS NOT NULL
+        WHERE service = ? AND status = 'active' AND key_storage_mode = 'managed' AND dcr_registration IS NOT NULL
       `)
       .bind(serviceId)
       .all<{ id: string; dcr_registration: string; secret_url_segment_1: string; key_fingerprint: string }>();

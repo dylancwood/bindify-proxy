@@ -294,6 +294,68 @@ async function executeMigration(
     }
   }
 
+  // Phase 2b: Re-encrypt DCR registrations for zero_knowledge connections.
+  // ZK connections store dcr_registration encrypted with managed keys but their
+  // encrypted_tokens use the user's secret2, so only dcr_registration is rotated.
+  const zkDcrConnections = await db
+    .prepare(
+      "SELECT id, secret_url_segment_1, dcr_registration, key_fingerprint FROM connections WHERE key_storage_mode = 'zero_knowledge' AND dcr_registration IS NOT NULL AND key_fingerprint != ? AND key_fingerprint != ''"
+    )
+    .bind(activeFingerprint)
+    .all<{ id: string; secret_url_segment_1: string; dcr_registration: string; key_fingerprint: string }>();
+
+  for (const conn of zkDcrConnections.results) {
+    try {
+      let oldMasterKey: string;
+      try {
+        oldMasterKey = getManagedKey(configKeys, conn.key_fingerprint);
+      } catch {
+        errors.push({
+          connectionId: conn.id,
+          error: `ZK DCR: No key found for fingerprint ${conn.key_fingerprint}`,
+        });
+        connectionCounts.errors++;
+        continue;
+      }
+
+      const oldCryptoKey = await deriveManagedEncryptionKey(oldMasterKey, conn.id);
+      const newCryptoKey = await deriveManagedEncryptionKey(activeKey.key, conn.id);
+
+      const decryptedDcr = await decryptTokenDataWithKey(conn.dcr_registration, oldCryptoKey);
+      const newDcrRegistration = await encryptTokenDataWithKey(decryptedDcr, newCryptoKey);
+
+      await db
+        .prepare(
+          'UPDATE connections SET dcr_registration = ?, key_fingerprint = ? WHERE id = ?'
+        )
+        .bind(newDcrRegistration, activeFingerprint, conn.id)
+        .run();
+
+      // Update KV cache
+      const kvKey = `proxy:${conn.secret_url_segment_1}`;
+      const kvRaw = await kv.get(kvKey);
+      if (kvRaw) {
+        try {
+          const kvEntry = JSON.parse(kvRaw);
+          kvEntry.dcrRegistration = newDcrRegistration;
+          kvEntry.keyFingerprint = activeFingerprint;
+          await kv.put(kvKey, JSON.stringify(kvEntry));
+        } catch {
+          // KV update failure is non-fatal — consistency check will fix it
+        }
+      }
+
+      migrated++;
+      connectionCounts.migrated++;
+    } catch (err) {
+      errors.push({
+        connectionId: conn.id,
+        error: `ZK DCR: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      connectionCounts.errors++;
+    }
+  }
+
   // Scrub new_key_hex and mark completed
   await db
     .prepare(
@@ -317,9 +379,11 @@ export async function detectOrphanedFingerprints(
   configFingerprints: string[],
   logger: { error: (...args: unknown[]) => void }
 ): Promise<void> {
+  // Check managed connections and ZK connections with DCR registrations
+  // (DCR registrations are always encrypted with managed keys regardless of key_storage_mode)
   const result = await db
     .prepare(
-      "SELECT DISTINCT key_fingerprint FROM connections WHERE key_storage_mode = 'managed'"
+      "SELECT DISTINCT key_fingerprint FROM connections WHERE key_storage_mode = 'managed' OR (key_storage_mode = 'zero_knowledge' AND dcr_registration IS NOT NULL)"
     )
     .all<{ key_fingerprint: string }>();
 
@@ -329,7 +393,7 @@ export async function detectOrphanedFingerprints(
     if (row.key_fingerprint === '') continue;
     if (!configSet.has(row.key_fingerprint)) {
       logger.error(
-        `Managed connections reference key fingerprint "${row.key_fingerprint}" which is not present in MANAGED_ENCRYPTION_KEYS. These connections cannot be decrypted.`
+        `Connections reference key fingerprint "${row.key_fingerprint}" which is not present in MANAGED_ENCRYPTION_KEYS. These connections' managed-key-encrypted data cannot be decrypted.`
       );
     }
   }
