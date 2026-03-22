@@ -120,6 +120,8 @@ describe('keepaliveDCRRegistrations', () => {
       auth_type: 'oauth', auth_mode: null, application: null,
       dcr_registration: encReg, encrypted_tokens: null, needs_reauth_at: null,
       key_fingerprint: activeKey.fingerprint,
+      managed_key_fingerprint: activeKey.fingerprint,
+      dcr_key_fingerprint: activeKey.fingerprint,
     });
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('Not found', { status: 404 }));
@@ -146,6 +148,8 @@ describe('keepaliveDCRRegistrations', () => {
       auth_type: 'oauth', auth_mode: null, application: null,
       dcr_registration: encReg, encrypted_tokens: null, needs_reauth_at: null,
       key_fingerprint: activeKey.fingerprint,
+      managed_key_fingerprint: activeKey.fingerprint,
+      dcr_key_fingerprint: activeKey.fingerprint,
     });
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('ok', { status: 200 }));
@@ -285,9 +289,11 @@ describe('refreshManagedConnection failure handling', () => {
       encrypted_tokens: encrypted,
       needs_reauth_at: null,
       key_fingerprint: activeKey.fingerprint,
+      managed_key_fingerprint: activeKey.fingerprint,
+      dcr_key_fingerprint: encryptedDcrRegistration ? activeKey.fingerprint : '',
     };
     await createConnection(env.DB, conn);
-    return { ...conn, key_version: 0, key_fingerprint: activeKey.fingerprint, created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
+    return { ...conn, key_version: 0, managed_key_fingerprint: activeKey.fingerprint, dcr_key_fingerprint: encryptedDcrRegistration ? activeKey.fingerprint : '', created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
   }
 
   it('sets needs_reauth_at on invalid_grant', async () => {
@@ -378,13 +384,15 @@ describe('keepaliveManagedConnection', () => {
       encrypted_tokens: encrypted,
       needs_reauth_at: needsReauthAt ?? null,
       key_fingerprint: activeKey.fingerprint,
+      managed_key_fingerprint: activeKey.fingerprint,
+      dcr_key_fingerprint: '',
     };
     await createConnection(env.DB, conn);
     if (needsReauthAt) {
       await env.DB.prepare('UPDATE connections SET needs_reauth_at = ? WHERE id = ?')
         .bind(needsReauthAt, id).run();
     }
-    return { ...conn, key_version: 0, key_fingerprint: activeKey.fingerprint, created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
+    return { ...conn, key_version: 0, managed_key_fingerprint: activeKey.fingerprint, dcr_key_fingerprint: '', created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
   }
 
   it('updates last_refreshed_at on successful keep-alive', async () => {
@@ -564,6 +572,8 @@ describe('ZK mode safety', () => {
       last_refreshed_at: null,
       key_version: 0,
       key_fingerprint: '',
+      managed_key_fingerprint: '',
+      dcr_key_fingerprint: '',
       created_at: '',
     };
 
@@ -599,6 +609,10 @@ describe('ZK mode safety', () => {
       suspended_at: null,
       last_used_at: null,
       last_refreshed_at: null,
+      key_version: 0,
+      key_fingerprint: '',
+      managed_key_fingerprint: '',
+      dcr_key_fingerprint: '',
       created_at: '',
     };
 
