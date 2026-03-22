@@ -98,6 +98,8 @@ describe('buildProxyCacheEntry', () => {
       encrypted_tokens: null,
       key_version: 1,
       key_fingerprint: TEST_KEY_FINGERPRINT,
+      managed_key_fingerprint: TEST_KEY_FINGERPRINT,
+      dcr_key_fingerprint: '',
       needs_reauth_at: null,
       suspended_at: null,
       last_used_at: null,

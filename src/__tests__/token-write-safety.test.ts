@@ -549,15 +549,19 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
       auth_type: 'oauth' as const,
       auth_mode: null,
       application: null,
+      label: null,
       dcr_registration: encDcr,
       encrypted_tokens: encryptedTokens,
       needs_reauth_at: null,
       suspended_at: null,
       last_used_at: null,
       last_refreshed_at: null,
+      metadata: null,
       created_at: '',
       key_version: 0,
       key_fingerprint: activeKey.fingerprint,
+      managed_key_fingerprint: activeKey.fingerprint,
+      dcr_key_fingerprint: activeKey.fingerprint,
     };
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -606,15 +610,19 @@ describe('Existing behavior audit: scheduler refresh token preservation', () => 
       auth_type: 'oauth' as const,
       auth_mode: null,
       application: null,
+      label: null,
       dcr_registration: encDcr,
       encrypted_tokens: encryptedTokens,
       needs_reauth_at: null,
       suspended_at: null,
       last_used_at: null,
       last_refreshed_at: null,
+      metadata: null,
       created_at: '',
       key_version: 0,
       key_fingerprint: activeKey.fingerprint,
+      managed_key_fingerprint: activeKey.fingerprint,
+      dcr_key_fingerprint: activeKey.fingerprint,
     };
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(

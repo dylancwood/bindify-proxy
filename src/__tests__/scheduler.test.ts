@@ -293,7 +293,7 @@ describe('refreshManagedConnection failure handling', () => {
       dcr_key_fingerprint: encryptedDcrRegistration ? activeKey.fingerprint : '',
     };
     await createConnection(env.DB, conn);
-    return { ...conn, key_version: 0, managed_key_fingerprint: activeKey.fingerprint, dcr_key_fingerprint: encryptedDcrRegistration ? activeKey.fingerprint : '', created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
+    return { ...conn, key_version: 0, label: null, managed_key_fingerprint: activeKey.fingerprint, dcr_key_fingerprint: encryptedDcrRegistration ? activeKey.fingerprint : '', metadata: null, created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
   }
 
   it('sets needs_reauth_at on invalid_grant', async () => {
@@ -392,7 +392,7 @@ describe('keepaliveManagedConnection', () => {
       await env.DB.prepare('UPDATE connections SET needs_reauth_at = ? WHERE id = ?')
         .bind(needsReauthAt, id).run();
     }
-    return { ...conn, key_version: 0, managed_key_fingerprint: activeKey.fingerprint, dcr_key_fingerprint: '', created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
+    return { ...conn, key_version: 0, label: null, managed_key_fingerprint: activeKey.fingerprint, dcr_key_fingerprint: '', metadata: null, created_at: '', last_used_at: null, last_refreshed_at: null, suspended_at: null };
   }
 
   it('updates last_refreshed_at on successful keep-alive', async () => {
@@ -564,12 +564,14 @@ describe('ZK mode safety', () => {
       auth_type: 'oauth' as const,
       auth_mode: null,
       application: null,
+      label: null,
       dcr_registration: null,
       encrypted_tokens: 'fake-encrypted',
       needs_reauth_at: null,
       suspended_at: null,
       last_used_at: null,
       last_refreshed_at: null,
+      metadata: null,
       key_version: 0,
       key_fingerprint: '',
       managed_key_fingerprint: '',
@@ -603,12 +605,14 @@ describe('ZK mode safety', () => {
       auth_type: 'oauth' as const,
       auth_mode: null,
       application: null,
+      label: null,
       dcr_registration: null,
       encrypted_tokens: 'fake-encrypted',
       needs_reauth_at: null,
       suspended_at: null,
       last_used_at: null,
       last_refreshed_at: null,
+      metadata: null,
       key_version: 0,
       key_fingerprint: '',
       managed_key_fingerprint: '',
