@@ -287,6 +287,8 @@ export async function handleCallback(
       encrypted_tokens: encryptedTokens,
       needs_reauth_at: null,
       key_fingerprint: activeKeyFingerprint,
+      managed_key_fingerprint: keyStorageMode === 'managed' ? activeKeyFingerprint : '',
+      dcr_key_fingerprint: encryptedDcrRegistration ? activeKeyFingerprint : '',
     });
   } catch (err) {
     // Restore old connection if new one fails to create
@@ -323,6 +325,8 @@ export async function handleCallback(
         last_refreshed_at: null,
         created_at: new Date().toISOString(),
         key_fingerprint: activeKeyFingerprint,
+        managed_key_fingerprint: keyStorageMode === 'managed' ? activeKeyFingerprint : '',
+        dcr_key_fingerprint: encryptedDcrRegistration ? activeKeyFingerprint : '',
       };
       const cacheEntry = buildProxyCacheEntry(
         cacheConnection,
@@ -657,6 +661,8 @@ export async function handleApiKeyConnect(
         last_refreshed_at: null,
         created_at: new Date().toISOString(),
         key_fingerprint: '',
+        managed_key_fingerprint: '',
+        dcr_key_fingerprint: '',
       };
       const cacheEntry = buildProxyCacheEntry(
         cacheConnection,

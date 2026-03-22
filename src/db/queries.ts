@@ -37,11 +37,11 @@ export async function getConnectionBySecret1(
     .first<Connection>();
 }
 
-export async function createConnection(db: D1Database, connection: Omit<Connection, 'created_at' | 'last_used_at' | 'last_refreshed_at' | 'suspended_at' | 'metadata' | 'auth_mode' | 'application' | 'label' | 'encrypted_tokens' | 'key_fingerprint' | 'key_version'> & { auth_mode?: string | null; application?: string | null; label?: string | null; encrypted_tokens?: string | null; key_fingerprint?: string; metadata?: string | null }): Promise<void> {
+export async function createConnection(db: D1Database, connection: Omit<Connection, 'created_at' | 'last_used_at' | 'last_refreshed_at' | 'suspended_at' | 'metadata' | 'auth_mode' | 'application' | 'label' | 'encrypted_tokens' | 'key_fingerprint' | 'key_version' | 'managed_key_fingerprint' | 'dcr_key_fingerprint'> & { auth_mode?: string | null; application?: string | null; label?: string | null; encrypted_tokens?: string | null; key_fingerprint?: string; managed_key_fingerprint?: string; dcr_key_fingerprint?: string; metadata?: string | null }): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, auth_type, auth_mode, application, label, dcr_registration, encrypted_tokens, needs_reauth_at, key_fingerprint, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, auth_type, auth_mode, application, label, dcr_registration, encrypted_tokens, needs_reauth_at, key_fingerprint, managed_key_fingerprint, dcr_key_fingerprint, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       connection.id,
@@ -58,6 +58,8 @@ export async function createConnection(db: D1Database, connection: Omit<Connecti
       connection.encrypted_tokens ?? null,
       connection.needs_reauth_at ?? null,
       connection.key_fingerprint ?? '',
+      connection.managed_key_fingerprint ?? '',
+      connection.dcr_key_fingerprint ?? '',
       connection.metadata ?? null
     )
     .run();

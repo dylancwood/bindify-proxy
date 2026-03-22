@@ -1,9 +1,7 @@
 import type { Connection, User } from '@bindify/types';
 import type { Env } from '../index';
-import { getManagedEncryptionKeys } from '../index';
 import type { ConnectionWithUserRow } from '../db/queries';
 import { buildProxyCacheEntry, writeProxyCache, type ProxyCacheEntry } from './kv-cache';
-import { getActiveKey } from '../crypto';
 
 export function rowToConnection(row: ConnectionWithUserRow): Connection {
   return {
@@ -20,7 +18,9 @@ export function rowToConnection(row: ConnectionWithUserRow): Connection {
     dcr_registration: row.dcr_registration,
     encrypted_tokens: row.encrypted_tokens,
     key_version: 0, // deprecated
-    key_fingerprint: row.key_fingerprint,
+    key_fingerprint: row.key_fingerprint, // keep — deprecated but still in Connection type
+    managed_key_fingerprint: row.managed_key_fingerprint,
+    dcr_key_fingerprint: row.dcr_key_fingerprint,
     needs_reauth_at: row.needs_reauth_at,
     last_used_at: row.last_used_at,
     last_refreshed_at: row.last_refreshed_at,
@@ -52,13 +52,6 @@ export async function rebuildKvEntryFromRow(
   row: ConnectionWithUserRow,
 ): Promise<ProxyCacheEntry> {
   const connection = rowToConnection(row);
-
-  // If a managed connection has no fingerprint, use the active key's fingerprint
-  if (connection.key_storage_mode === 'managed' && !connection.key_fingerprint) {
-    const keys = await getManagedEncryptionKeys(env);
-    connection.key_fingerprint = getActiveKey(keys).fingerprint;
-  }
-
   const user = rowToUser(row);
   const entry = buildProxyCacheEntry(
     connection,

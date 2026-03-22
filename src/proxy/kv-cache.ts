@@ -1,7 +1,7 @@
 import type { Connection, User, TokenData, ApiKeyData } from '@bindify/types';
 import type { Env } from '../index';
 import type { AccessActiveResult } from '../auth/entitlements';
-import { decryptTokenData, deriveManagedEncryptionKey, decryptTokenDataWithKey, getManagedKey } from '../crypto';
+import { decryptTokenData, deriveManagedEncryptionKey, decryptTokenDataWithKey, getManagedKeyWithFallback } from '../crypto';
 import type { ManagedKeyEntry } from '../crypto';
 import { validateDecryptedTokens } from '../token-parsing';
 import { log } from '../logger';
@@ -9,7 +9,7 @@ import { writeConnectionEvent } from '../db/connection-events';
 import { getConnectionWithUserBySecret1 } from '../db/queries';
 import { rebuildKvEntryFromRow } from './kv-rebuild';
 
-export const PROXY_CACHE_SCHEMA_VERSION = 3;
+export const PROXY_CACHE_SCHEMA_VERSION = 4;
 
 const PROXY_CACHE_KEY_PREFIX = 'proxy:';
 
@@ -85,8 +85,8 @@ export async function withProxyCache<T>(
 
     const d1BackupFn = async () => {
       const stmt = env.DB
-        .prepare('UPDATE connections SET encrypted_tokens = ?, key_fingerprint = ? WHERE id = ?')
-        .bind(entry.encryptedTokens, entry.keyFingerprint, entry.connectionId);
+        .prepare('UPDATE connections SET encrypted_tokens = ?, managed_key_fingerprint = ? WHERE id = ?')
+        .bind(entry.encryptedTokens, entry.managedKeyFingerprint, entry.connectionId);
 
       if (!opts?.isTokenUpdate) {
         // Metadata-only write: single attempt, silent catch (existing behavior)
@@ -104,8 +104,8 @@ export async function withProxyCache<T>(
         });
         try {
           await env.DB
-            .prepare('UPDATE connections SET encrypted_tokens = ?, key_fingerprint = ? WHERE id = ?')
-            .bind(entry.encryptedTokens, entry.keyFingerprint, entry.connectionId)
+            .prepare('UPDATE connections SET encrypted_tokens = ?, managed_key_fingerprint = ? WHERE id = ?')
+            .bind(entry.encryptedTokens, entry.managedKeyFingerprint, entry.connectionId)
             .run();
         } catch (retryErr) {
           log.warn('D1 backup write retry failed, writing recovery event', {
@@ -196,14 +196,14 @@ export function checkCachedAccessActive(
 }
 
 export async function decryptCacheTokens(
-  entry: Pick<ProxyCacheEntry, 'authType' | 'keyStorageMode' | 'keyFingerprint' | 'connectionId' | 'encryptedTokens'>,
+  entry: Pick<ProxyCacheEntry, 'authType' | 'keyStorageMode' | 'managedKeyFingerprint' | 'connectionId' | 'encryptedTokens'>,
   secret2: string,
   managedEncryptionKeys: ManagedKeyEntry[]
 ): Promise<TokenData | ApiKeyData> {
   let decrypted: string;
 
   if (entry.keyStorageMode === 'managed') {
-    const masterKey = getManagedKey(managedEncryptionKeys, entry.keyFingerprint);
+    const masterKey = getManagedKeyWithFallback(managedEncryptionKeys, entry.managedKeyFingerprint, entry.connectionId);
     const key = await deriveManagedEncryptionKey(masterKey, entry.connectionId);
     decrypted = await decryptTokenDataWithKey(entry.encryptedTokens, key);
   } else {
@@ -232,7 +232,8 @@ export function buildProxyCacheEntry(
     authMode: connection.auth_mode,
     application: connection.application,
     keyStorageMode: connection.key_storage_mode,
-    keyFingerprint: connection.key_fingerprint,
+    managedKeyFingerprint: connection.managed_key_fingerprint,
+    dcrKeyFingerprint: connection.dcr_key_fingerprint,
     dcrRegistration: connection.dcr_registration,
     needsReauthAt: connection.needs_reauth_at,
     encryptedTokens,
