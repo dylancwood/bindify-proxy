@@ -211,7 +211,9 @@ async function handleSubscriptionDeleted(env: Env, subscription: Record<string, 
   // Validate required fields
   const customerId = subscription.customer;
   const subscriptionId = subscription.id;
-  const currentPeriodEnd = subscription.current_period_end;
+  const items = subscription.items as { data?: unknown[] } | undefined;
+  const item = items?.data?.[0] as Record<string, unknown> | undefined;
+  const currentPeriodEnd = (item?.current_period_end ?? subscription.current_period_end ?? subscription.ended_at) as number | undefined;
 
   if (typeof customerId !== 'string') {
     throw new Error(`Invalid subscription.deleted payload: missing or invalid customer field`);

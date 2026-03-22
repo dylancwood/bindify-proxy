@@ -282,6 +282,62 @@ describe('Webhook: customer.subscription.updated', () => {
   });
 });
 
+describe('Webhook: customer.subscription.deleted', () => {
+  it('extracts current_period_end from items.data when absent on subscription root (BIN-360)', async () => {
+    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    await createUser(env.DB, 'user_del_item', trialEnd);
+    await setStripeCustomerId(env.DB, 'user_del_item', 'cus_del_item');
+
+    const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+
+    await processWebhookEvent(env, {
+      type: 'customer.subscription.deleted',
+      data: {
+        object: {
+          id: 'sub_del_item',
+          customer: 'cus_del_item',
+          status: 'canceled',
+          items: {
+            data: [{ quantity: 1, current_period_end: periodEnd }],
+          },
+        },
+      },
+    });
+
+    const user = await getUserById(env.DB, 'user_del_item');
+    expect(user!.plan).toBe('canceled');
+    expect(user!.access_until).toBe(new Date(periodEnd * 1000).toISOString());
+
+    const sub = await getSubscriptionById(env.DB, 'sub_del_item');
+    expect(sub!.status).toBe('canceled');
+    expect(sub!.quantity).toBe(0);
+  });
+
+  it('falls back to ended_at when current_period_end is absent everywhere (BIN-360)', async () => {
+    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    await createUser(env.DB, 'user_del_ended', trialEnd);
+    await setStripeCustomerId(env.DB, 'user_del_ended', 'cus_del_ended');
+
+    const endedAt = Math.floor(Date.now() / 1000);
+
+    await processWebhookEvent(env, {
+      type: 'customer.subscription.deleted',
+      data: {
+        object: {
+          id: 'sub_del_ended',
+          customer: 'cus_del_ended',
+          status: 'canceled',
+          ended_at: endedAt,
+        },
+      },
+    });
+
+    const user = await getUserById(env.DB, 'user_del_ended');
+    expect(user!.plan).toBe('canceled');
+    expect(user!.access_until).toBe(new Date(endedAt * 1000).toISOString());
+  });
+});
+
 describe('Webhook: invoice.payment_failed', () => {
   it('sets subscription to past_due', async () => {
     const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
