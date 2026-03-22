@@ -182,19 +182,19 @@ describe('checkKvD1Consistency', () => {
     expect(anomaly!.rectified).toBe(1);
   });
 
-  it('rectifies stale KV data (keyFingerprint mismatch)', async () => {
+  it('rectifies stale KV data (managedKeyFingerprint mismatch)', async () => {
     await createConnection(env.DB, makeConnection({
       id: 'conn-stale',
       secret_url_segment_1: 'secret-stale',
       encrypted_tokens: 'encrypted-data',
-      key_fingerprint: 'fp-new',
+      managed_key_fingerprint: 'fp-new',
     }));
-    // Update key_fingerprint in D1
-    await env.DB.prepare('UPDATE connections SET key_fingerprint = ? WHERE id = ?').bind('fp-new', 'conn-stale').run();
+    // Update managed_key_fingerprint in D1
+    await env.DB.prepare('UPDATE connections SET managed_key_fingerprint = ? WHERE id = ?').bind('fp-new', 'conn-stale').run();
 
     // Write a stale KV entry with old fingerprint
     const staleEntry = buildProxyCacheEntry(
-      makeConnectionObj({ id: 'conn-stale', secret_url_segment_1: 'secret-stale', key_fingerprint: 'fp-old' }),
+      makeConnectionObj({ id: 'conn-stale', secret_url_segment_1: 'secret-stale', managed_key_fingerprint: 'fp-old' }),
       makeUser(),
       null,
       null,
@@ -209,7 +209,7 @@ describe('checkKvD1Consistency', () => {
     // Verify KV was updated
     const kvRaw = await env.KV.get('proxy:secret-stale');
     const kvEntry = JSON.parse(kvRaw!);
-    expect(kvEntry.keyFingerprint).toBe('fp-new');
+    expect(kvEntry.managedKeyFingerprint).toBe('fp-new');
 
     // Verify anomaly was reported
     const anomaly = await env.DB.prepare(

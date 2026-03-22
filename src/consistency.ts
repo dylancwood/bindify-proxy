@@ -20,7 +20,8 @@ const COMPARISON_FIELDS: Array<{
 }> = [
   { kvField: 'connectionId', d1Field: 'id' },
   { kvField: 'status', d1Field: 'status' },
-  { kvField: 'keyFingerprint', d1Field: 'key_fingerprint' },
+  { kvField: 'managedKeyFingerprint', d1Field: 'managed_key_fingerprint' },
+  { kvField: 'dcrKeyFingerprint', d1Field: 'dcr_key_fingerprint' },
   { kvField: 'userId', d1Field: 'user_id' },
   { kvField: 'service', d1Field: 'service' },
   { kvField: 'authType', d1Field: 'auth_type' },
