@@ -23,7 +23,8 @@ export interface ProxyCacheEntry {
   authMode: string | null;
   application: string | null;
   keyStorageMode: 'managed' | 'zero_knowledge';
-  keyFingerprint: string;
+  managedKeyFingerprint: string;
+  dcrKeyFingerprint: string;
   dcrRegistration: string | null;
   needsReauthAt: string | null;
   encryptedTokens: string;

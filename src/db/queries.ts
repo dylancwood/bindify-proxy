@@ -336,6 +336,8 @@ export interface ConnectionWithUserRow {
   dcr_registration: string | null;
   encrypted_tokens: string | null;
   key_fingerprint: string;
+  managed_key_fingerprint: string;
+  dcr_key_fingerprint: string;
   needs_reauth_at: string | null;
   last_used_at: string | null;
   last_refreshed_at: string | null;
