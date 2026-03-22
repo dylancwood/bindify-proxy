@@ -396,3 +396,109 @@ describe('ZK proxy refresh key correctness', () => {
     }
   });
 });
+
+describe('ZK+DCR connection decrypts stored DCR registration (BIN-369)', () => {
+  const ZK_DCR_CONNECTION_ID = 'conn-zk-dcr-test';
+  const zkDcrCreds = makeFixedCredentials(0x60, 0x61);
+
+  it('ZK connection with dcrKeyFingerprint decrypts stored DCR registration and uses its client_id', async () => {
+    const managedKeys = await getManagedEncryptionKeys(env as any);
+    const activeKey = managedKeys[managedKeys.length - 1];
+
+    // Create a DCR registration encrypted with the managed key (as stored for ZK+DCR connections)
+    const dcrRegistration = JSON.stringify({
+      client_id: 'zk-dcr-client-id-12345',
+      client_secret: 'zk-dcr-client-secret',
+    });
+    const dcrKey = await deriveManagedEncryptionKey(activeKey.key, ZK_DCR_CONNECTION_ID);
+    const encryptedDcr = await encryptTokenDataWithKey(dcrRegistration, dcrKey);
+
+    // Encrypt tokens with secret2 (ZK-style)
+    const tokenData = JSON.stringify({
+      access_token: 'zk-dcr-access-expiring',
+      refresh_token: 'zk-dcr-refresh-token',
+      expires_at: Math.floor(Date.now() / 1000) + 60, // expires soon
+    });
+    const encryptedTokens = await encryptTokenData(tokenData, zkDcrCreds.secret2);
+
+    // Set up DB records
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO users (id, plan, trial_ends_at) VALUES ('zk-dcr-user', 'free_trial', '2099-12-31T23:59:59Z')`
+    ).run();
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO connections (id, user_id, service, secret_url_segment_1, status, key_storage_mode, dcr_registration, dcr_key_fingerprint)
+       VALUES (?, 'zk-dcr-user', 'notion', ?, 'active', 'zero_knowledge', ?, ?)`
+    ).bind(ZK_DCR_CONNECTION_ID, zkDcrCreds.secret1, encryptedDcr, activeKey.fingerprint).run();
+
+    // Build KV cache entry: ZK connection with dcrKeyFingerprint set
+    const cacheEntry = {
+      schemaVersion: PROXY_CACHE_SCHEMA_VERSION,
+      connectionId: ZK_DCR_CONNECTION_ID,
+      userId: 'zk-dcr-user',
+      service: 'notion',
+      status: 'active',
+      authType: 'oauth',
+      authMode: null,
+      application: null,
+      keyStorageMode: 'zero_knowledge',
+      managedKeyFingerprint: '',
+      dcrKeyFingerprint: activeKey.fingerprint,
+      dcrRegistration: encryptedDcr,
+      needsReauthAt: null,
+      encryptedTokens,
+      user: { plan: 'free_trial', trialEndsAt: '2099-12-31T23:59:59Z', accessUntil: null },
+      subscriptionStatus: null,
+      subscriptionPastDueSince: null,
+      cachedAt: new Date().toISOString(),
+    };
+    await env.KV.put(`proxy:${zkDcrCreds.secret1}`, JSON.stringify(cacheEntry));
+
+    // Track what client_id is used in the token refresh request
+    let capturedClientId: string | null = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('mcp.notion.com/token')) {
+        // Capture the client_id from the request body
+        const body = init?.body?.toString() ?? '';
+        const params = new URLSearchParams(body);
+        capturedClientId = params.get('client_id');
+        return new Response(JSON.stringify({
+          access_token: 'zk-dcr-new-access',
+          refresh_token: 'zk-dcr-new-refresh',
+          expires_in: 3600,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('mcp.notion.com/mcp')) {
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0', id: 1, result: { tools: [] },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return originalFetch(input, init);
+    };
+
+    try {
+      const response = await SELF.fetch(`http://localhost/mcp/notion/${zkDcrCreds.credentials}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
+      });
+      expect(response.status).toBe(200);
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Verify the correct client_id from the stored DCR was used
+      expect(capturedClientId).toBe('zk-dcr-client-id-12345');
+
+      // Verify the new tokens were re-encrypted with secret2 (ZK-style)
+      const raw = await env.KV.get(`proxy:${zkDcrCreds.secret1}`);
+      expect(raw).not.toBeNull();
+      const updatedEntry = JSON.parse(raw!);
+      const decrypted = await decryptTokenData(updatedEntry.encryptedTokens, zkDcrCreds.secret2);
+      const newTokens = JSON.parse(decrypted);
+      expect(newTokens.access_token).toBe('zk-dcr-new-access');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

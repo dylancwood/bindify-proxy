@@ -5,7 +5,7 @@ import { getService } from '../services/registry';
 import { updateConnectionLastUsed, updateConnectionStatus, setSuspendedAt, clearNeedsReauthAt, setNeedsReauthAt, getUserById, getSubscriptionsByUserId, acquireRefreshLock } from '../db/queries';
 import { isHealthCheckRequest, healthCheckResponse } from './healthcheck';
 import { jsonRpcError, extractRequestId } from './errors';
-import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, decodeCredentials, getManagedKey, getActiveKey, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
+import { encryptTokenData, deriveManagedEncryptionKey, encryptTokenDataWithKey, decryptTokenDataWithKey, decodeCredentials, getManagedKeyWithFallback, getActiveKey, PERMANENT_TOKEN_EXPIRY_SECONDS } from '../crypto';
 import { getDCRClientId } from '../services/dcr';
 import { getCallbackUrl } from '../utils/url';
 import { log } from '../logger';
@@ -188,9 +188,9 @@ async function performTokenRefresh(
 
   // Get client credentials
   let clientId: string;
-  if (serviceDef.config.useDCR && entry.dcrRegistration && entry.keyStorageMode === 'managed') {
+  if (serviceDef.config.useDCR && entry.dcrRegistration && entry.dcrKeyFingerprint) {
     const keys = await getManagedEncryptionKeys(env);
-    const dcrMasterKey = getManagedKey(keys, entry.keyFingerprint);
+    const dcrMasterKey = getManagedKeyWithFallback(keys, entry.dcrKeyFingerprint, entry.connectionId);
     const dcrKey = await deriveManagedEncryptionKey(dcrMasterKey, entry.connectionId);
     const decryptedDcr = await decryptTokenDataWithKey(entry.dcrRegistration, dcrKey);
     const reg = JSON.parse(decryptedDcr);
@@ -333,7 +333,7 @@ async function performTokenRefresh(
     const active = getActiveKey(keys);
     const encKey = await deriveManagedEncryptionKey(active.key, entry.connectionId);
     encrypted = await encryptTokenDataWithKey(JSON.stringify(updated), encKey);
-    entry.keyFingerprint = active.fingerprint;
+    entry.managedKeyFingerprint = active.fingerprint;
   } else {
     encrypted = await encryptTokenData(JSON.stringify(updated), secret2);
   }
