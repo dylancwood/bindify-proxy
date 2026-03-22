@@ -188,7 +188,7 @@ async function performTokenRefresh(
 
   // Get client credentials
   let clientId: string;
-  if (serviceDef.config.useDCR && entry.dcrRegistration) {
+  if (serviceDef.config.useDCR && entry.dcrRegistration && entry.keyStorageMode === 'managed') {
     const keys = await getManagedEncryptionKeys(env);
     const dcrMasterKey = getManagedKey(keys, entry.keyFingerprint);
     const dcrKey = await deriveManagedEncryptionKey(dcrMasterKey, entry.connectionId);
