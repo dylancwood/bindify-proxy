@@ -23,7 +23,7 @@ interface ManagedConnection {
   id: string;
   secret_url_segment_1: string;
   encrypted_tokens: string | null;
-  key_fingerprint: string;
+  managed_key_fingerprint: string;
   dcr_registration: string | null;
 }
 
@@ -170,10 +170,10 @@ async function executeMigration(
     .bind(JSON.stringify({ phase: 'migrating', message: 'Querying connections to migrate...' }), row.id)
     .run();
 
-  // Query all managed connections that need migration
+  // Phase 1: Query managed connections whose tokens need migration
   const connections = await db
     .prepare(
-      "SELECT id, secret_url_segment_1, encrypted_tokens, key_fingerprint, dcr_registration FROM connections WHERE key_storage_mode = 'managed' AND key_fingerprint != ?"
+      "SELECT id, secret_url_segment_1, encrypted_tokens, managed_key_fingerprint, dcr_registration FROM connections WHERE managed_key_fingerprint != ? AND managed_key_fingerprint != ''"
     )
     .bind(activeFingerprint)
     .all<ManagedConnection>();
@@ -181,7 +181,7 @@ async function executeMigration(
   // Count already-current connections
   const currentResult = await db
     .prepare(
-      "SELECT COUNT(*) as count FROM connections WHERE key_storage_mode = 'managed' AND key_fingerprint = ?"
+      "SELECT COUNT(*) as count FROM connections WHERE managed_key_fingerprint = ?"
     )
     .bind(activeFingerprint)
     .first<{ count: number }>();
@@ -223,11 +223,11 @@ async function executeMigration(
       // Decrypt with old key
       let oldMasterKey: string;
       try {
-        oldMasterKey = getManagedKey(configKeys, conn.key_fingerprint);
+        oldMasterKey = getManagedKey(configKeys, conn.managed_key_fingerprint);
       } catch {
         errors.push({
           connectionId: conn.id,
-          error: `No key found for fingerprint ${conn.key_fingerprint}`,
+          error: `No key found for fingerprint ${conn.managed_key_fingerprint}`,
         });
         connectionCounts.errors++;
         continue;
@@ -240,7 +240,7 @@ async function executeMigration(
       const newCryptoKey = await deriveManagedEncryptionKey(activeKey.key, conn.id);
       const newEncryptedTokens = await encryptTokenDataWithKey(decryptedTokens, newCryptoKey);
 
-      // Re-encrypt DCR registration if present
+      // Re-encrypt DCR registration if present (managed connections use same key for both)
       let newDcrRegistration: string | null = null;
       if (conn.dcr_registration) {
         const decryptedDcr = await decryptTokenDataWithKey(conn.dcr_registration, oldCryptoKey);
@@ -251,14 +251,14 @@ async function executeMigration(
       if (newDcrRegistration !== null) {
         await db
           .prepare(
-            'UPDATE connections SET encrypted_tokens = ?, key_fingerprint = ?, dcr_registration = ?, key_version = key_version + 1 WHERE id = ?'
+            'UPDATE connections SET encrypted_tokens = ?, managed_key_fingerprint = ?, dcr_registration = ?, dcr_key_fingerprint = ? WHERE id = ?'
           )
-          .bind(newEncryptedTokens, activeFingerprint, newDcrRegistration, conn.id)
+          .bind(newEncryptedTokens, activeFingerprint, newDcrRegistration, activeFingerprint, conn.id)
           .run();
       } else {
         await db
           .prepare(
-            'UPDATE connections SET encrypted_tokens = ?, key_fingerprint = ?, key_version = key_version + 1 WHERE id = ?'
+            'UPDATE connections SET encrypted_tokens = ?, managed_key_fingerprint = ? WHERE id = ?'
           )
           .bind(newEncryptedTokens, activeFingerprint, conn.id)
           .run();
@@ -271,9 +271,10 @@ async function executeMigration(
         try {
           const kvEntry = JSON.parse(kvRaw);
           kvEntry.encryptedTokens = newEncryptedTokens;
-          kvEntry.keyFingerprint = activeFingerprint;
+          kvEntry.managedKeyFingerprint = activeFingerprint;
           if (newDcrRegistration !== null) {
             kvEntry.dcrRegistration = newDcrRegistration;
+            kvEntry.dcrKeyFingerprint = activeFingerprint;
           }
           await kv.put(kvKey, JSON.stringify(kvEntry));
         } catch {
@@ -294,25 +295,26 @@ async function executeMigration(
     }
   }
 
-  // Phase 2b: Re-encrypt DCR registrations for zero_knowledge connections.
+  // Phase 2: Re-encrypt DCR registrations for zero_knowledge connections.
   // ZK connections store dcr_registration encrypted with managed keys but their
-  // encrypted_tokens use the user's secret2, so only dcr_registration is rotated.
+  // encrypted_tokens use the user's secret2, so only dcr_registration is rotated here.
+  // Managed connections with DCR were already handled in Phase 1 above.
   const zkDcrConnections = await db
     .prepare(
-      "SELECT id, secret_url_segment_1, dcr_registration, key_fingerprint FROM connections WHERE key_storage_mode = 'zero_knowledge' AND dcr_registration IS NOT NULL AND key_fingerprint != ? AND key_fingerprint != ''"
+      "SELECT id, secret_url_segment_1, dcr_registration, dcr_key_fingerprint FROM connections WHERE dcr_registration IS NOT NULL AND dcr_key_fingerprint != ? AND dcr_key_fingerprint != '' AND key_storage_mode = 'zero_knowledge'"
     )
     .bind(activeFingerprint)
-    .all<{ id: string; secret_url_segment_1: string; dcr_registration: string; key_fingerprint: string }>();
+    .all<{ id: string; secret_url_segment_1: string; dcr_registration: string; dcr_key_fingerprint: string }>();
 
   for (const conn of zkDcrConnections.results) {
     try {
       let oldMasterKey: string;
       try {
-        oldMasterKey = getManagedKey(configKeys, conn.key_fingerprint);
+        oldMasterKey = getManagedKey(configKeys, conn.dcr_key_fingerprint);
       } catch {
         errors.push({
           connectionId: conn.id,
-          error: `ZK DCR: No key found for fingerprint ${conn.key_fingerprint}`,
+          error: `ZK DCR: No key found for fingerprint ${conn.dcr_key_fingerprint}`,
         });
         connectionCounts.errors++;
         continue;
@@ -326,7 +328,7 @@ async function executeMigration(
 
       await db
         .prepare(
-          'UPDATE connections SET dcr_registration = ?, key_fingerprint = ? WHERE id = ?'
+          'UPDATE connections SET dcr_registration = ?, dcr_key_fingerprint = ? WHERE id = ?'
         )
         .bind(newDcrRegistration, activeFingerprint, conn.id)
         .run();
@@ -338,7 +340,7 @@ async function executeMigration(
         try {
           const kvEntry = JSON.parse(kvRaw);
           kvEntry.dcrRegistration = newDcrRegistration;
-          kvEntry.keyFingerprint = activeFingerprint;
+          kvEntry.dcrKeyFingerprint = activeFingerprint;
           await kv.put(kvKey, JSON.stringify(kvEntry));
         } catch {
           // KV update failure is non-fatal — consistency check will fix it
@@ -379,21 +381,19 @@ export async function detectOrphanedFingerprints(
   configFingerprints: string[],
   logger: { error: (...args: unknown[]) => void }
 ): Promise<void> {
-  // Check managed connections and ZK connections with DCR registrations
-  // (DCR registrations are always encrypted with managed keys regardless of key_storage_mode)
+  // Query all distinct fingerprints referenced by connections
   const result = await db
     .prepare(
-      "SELECT DISTINCT key_fingerprint FROM connections WHERE key_storage_mode = 'managed' OR (key_storage_mode = 'zero_knowledge' AND dcr_registration IS NOT NULL)"
+      "SELECT DISTINCT fp FROM (SELECT managed_key_fingerprint AS fp FROM connections WHERE managed_key_fingerprint != '' UNION SELECT dcr_key_fingerprint AS fp FROM connections WHERE dcr_key_fingerprint != '')"
     )
-    .all<{ key_fingerprint: string }>();
+    .all<{ fp: string }>();
 
   const configSet = new Set(configFingerprints);
 
   for (const row of result.results) {
-    if (row.key_fingerprint === '') continue;
-    if (!configSet.has(row.key_fingerprint)) {
+    if (!configSet.has(row.fp)) {
       logger.error(
-        `Connections reference key fingerprint "${row.key_fingerprint}" which is not present in MANAGED_ENCRYPTION_KEYS. These connections' managed-key-encrypted data cannot be decrypted.`
+        `Connections reference key fingerprint "${row.fp}" which is not present in MANAGED_ENCRYPTION_KEYS. These connections' managed-key-encrypted data cannot be decrypted.`
       );
     }
   }

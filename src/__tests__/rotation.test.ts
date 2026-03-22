@@ -115,7 +115,7 @@ describe('detectOrphanedFingerprints', () => {
     const mockDb = {
       prepare: vi.fn().mockReturnValue({
         all: vi.fn().mockResolvedValue({
-          results: [{ key_fingerprint: 'orphaned1234abcd' }],
+          results: [{ fp: 'orphaned1234abcd' }],
         }),
       }),
     };
@@ -134,7 +134,7 @@ describe('detectOrphanedFingerprints', () => {
     const mockDb = {
       prepare: vi.fn().mockReturnValue({
         all: vi.fn().mockResolvedValue({
-          results: [{ key_fingerprint: fp }],
+          results: [{ fp }],
         }),
       }),
     };
@@ -145,11 +145,11 @@ describe('detectOrphanedFingerprints', () => {
     expect(mockLogger.error).not.toHaveBeenCalled();
   });
 
-  it('ignores empty key_fingerprint rows (ZK connections)', async () => {
+  it('empty fingerprint rows are excluded by the WHERE clause (no results returned)', async () => {
     const mockDb = {
       prepare: vi.fn().mockReturnValue({
         all: vi.fn().mockResolvedValue({
-          results: [{ key_fingerprint: '' }],
+          results: [], // WHERE clause excludes empty fingerprints
         }),
       }),
     };
@@ -262,10 +262,10 @@ describe('processRotationRequests - migration phase', () => {
 
     await env.DB
       .prepare(
-        `INSERT INTO connections (id, user_id, service, secret_url_segment_1, key_storage_mode, key_fingerprint, encrypted_tokens, dcr_registration)
-         VALUES (?, 'user1', 'linear', ?, 'managed', ?, ?, ?)`
+        `INSERT INTO connections (id, user_id, service, secret_url_segment_1, key_storage_mode, key_fingerprint, managed_key_fingerprint, dcr_key_fingerprint, encrypted_tokens, dcr_registration)
+         VALUES (?, 'user1', 'linear', ?, 'managed', ?, ?, ?, ?, ?)`
       )
-      .bind(id, secret1, fingerprint, encryptedTokens, dcrRegistration)
+      .bind(id, secret1, fingerprint, fingerprint, dcrRegistration ? fingerprint : '', encryptedTokens, dcrRegistration)
       .run();
 
     return { encryptedTokens, dcrRegistration };
@@ -311,7 +311,7 @@ describe('processRotationRequests - migration phase', () => {
 
     // Check D1
     const conn = await env.DB.prepare('SELECT * FROM connections WHERE id = ?').bind('conn1').first<any>();
-    expect(conn.key_fingerprint).toBe(FP_V2);
+    expect(conn.managed_key_fingerprint).toBe(FP_V2);
 
     // Decrypt with new key to verify
     const newCryptoKey = await deriveManagedEncryptionKey(MASTER_KEY_V2, 'conn1');
@@ -321,7 +321,7 @@ describe('processRotationRequests - migration phase', () => {
     // Check KV
     const kvRaw = await env.KV.get('proxy:secret1');
     const kvEntry = JSON.parse(kvRaw!);
-    expect(kvEntry.keyFingerprint).toBe(FP_V2);
+    expect(kvEntry.managedKeyFingerprint).toBe(FP_V2);
     const kvDecrypted = await decryptTokenDataWithKey(kvEntry.encryptedTokens, newCryptoKey);
     expect(JSON.parse(kvDecrypted).access_token).toBe('tok1');
 
@@ -362,10 +362,10 @@ describe('processRotationRequests - migration phase', () => {
     // Insert a connection with null encrypted_tokens manually
     await env.DB
       .prepare(
-        `INSERT INTO connections (id, user_id, service, secret_url_segment_1, key_storage_mode, key_fingerprint, encrypted_tokens)
-         VALUES ('conn-bad', 'user1', 'linear', 'secret-bad', 'managed', ?, NULL)`
+        `INSERT INTO connections (id, user_id, service, secret_url_segment_1, key_storage_mode, key_fingerprint, managed_key_fingerprint, encrypted_tokens)
+         VALUES ('conn-bad', 'user1', 'linear', 'secret-bad', 'managed', ?, ?, NULL)`
       )
-      .bind(FP_V1)
+      .bind(FP_V1, FP_V1)
       .run();
 
     await env.DB
@@ -386,7 +386,7 @@ describe('processRotationRequests - migration phase', () => {
 
     // Good connection was still migrated
     const conn = await env.DB.prepare('SELECT * FROM connections WHERE id = ?').bind('conn-good').first<any>();
-    expect(conn.key_fingerprint).toBe(FP_V2);
+    expect(conn.managed_key_fingerprint).toBe(FP_V2);
   });
 
   it('handles missing KV entry gracefully', async () => {
@@ -405,7 +405,7 @@ describe('processRotationRequests - migration phase', () => {
 
     // D1 should still be updated
     const conn = await env.DB.prepare('SELECT * FROM connections WHERE id = ?').bind('conn-no-kv').first<any>();
-    expect(conn.key_fingerprint).toBe(FP_V2);
+    expect(conn.managed_key_fingerprint).toBe(FP_V2);
 
     // Migration should succeed without errors
     const rotRow = await env.DB.prepare('SELECT * FROM pending_key_rotations LIMIT 1').first<any>();
@@ -433,7 +433,8 @@ describe('processRotationRequests - migration phase', () => {
 
     // Verify D1 DCR re-encrypted
     const conn = await env.DB.prepare('SELECT * FROM connections WHERE id = ?').bind('conn-dcr').first<any>();
-    expect(conn.key_fingerprint).toBe(FP_V2);
+    expect(conn.managed_key_fingerprint).toBe(FP_V2);
+    expect(conn.dcr_key_fingerprint).toBe(FP_V2);
     expect(conn.dcr_registration).not.toBeNull();
 
     const newCryptoKey = await deriveManagedEncryptionKey(MASTER_KEY_V2, 'conn-dcr');
@@ -458,10 +459,10 @@ describe('processRotationRequests - migration phase', () => {
     // Insert as zero_knowledge connection with DCR registration
     await env.DB
       .prepare(
-        `INSERT INTO connections (id, user_id, service, secret_url_segment_1, key_storage_mode, key_fingerprint, encrypted_tokens, dcr_registration)
-         VALUES ('conn-zk-dcr', 'user1', 'notion', 'secret-zk-dcr', 'zero_knowledge', ?, 'zk-user-encrypted-tokens', ?)`
+        `INSERT INTO connections (id, user_id, service, secret_url_segment_1, key_storage_mode, key_fingerprint, dcr_key_fingerprint, encrypted_tokens, dcr_registration)
+         VALUES ('conn-zk-dcr', 'user1', 'notion', 'secret-zk-dcr', 'zero_knowledge', ?, ?, 'zk-user-encrypted-tokens', ?)`
       )
-      .bind(FP_V1, encDcr)
+      .bind(FP_V1, FP_V1, encDcr)
       .run();
 
     // Write KV entry
@@ -475,8 +476,8 @@ describe('processRotationRequests - migration phase', () => {
       authMode: null,
       application: null,
       keyStorageMode: 'zero_knowledge',
-      managedKeyFingerprint: FP_V1,
-      dcrKeyFingerprint: '',
+      managedKeyFingerprint: '',
+      dcrKeyFingerprint: FP_V1,
       dcrRegistration: encDcr,
       needsReauthAt: null,
       encryptedTokens: 'zk-user-encrypted-tokens',
@@ -496,9 +497,9 @@ describe('processRotationRequests - migration phase', () => {
 
     await processRotationRequests(env.DB, env.KV, KEYS_V1_V2, logger);
 
-    // Verify D1: DCR re-encrypted, key_fingerprint updated
+    // Verify D1: DCR re-encrypted, dcr_key_fingerprint updated
     const conn = await env.DB.prepare('SELECT * FROM connections WHERE id = ?').bind('conn-zk-dcr').first<any>();
-    expect(conn.key_fingerprint).toBe(FP_V2);
+    expect(conn.dcr_key_fingerprint).toBe(FP_V2);
     expect(conn.key_storage_mode).toBe('zero_knowledge');
     // encrypted_tokens should NOT have been changed (ZK uses user's secret2)
     expect(conn.encrypted_tokens).toBe('zk-user-encrypted-tokens');
@@ -510,7 +511,7 @@ describe('processRotationRequests - migration phase', () => {
     // Verify KV updated
     const kvRaw = await env.KV.get('proxy:secret-zk-dcr');
     const kvEntry = JSON.parse(kvRaw!);
-    expect(kvEntry.keyFingerprint).toBe(FP_V2);
+    expect(kvEntry.dcrKeyFingerprint).toBe(FP_V2);
     expect(kvEntry.keyStorageMode).toBe('zero_knowledge');
     // KV encrypted_tokens should be unchanged
     expect(kvEntry.encryptedTokens).toBe('zk-user-encrypted-tokens');
