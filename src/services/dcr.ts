@@ -83,6 +83,11 @@ async function registerDCRClientFull(
   const body = {
     redirect_uris: [callbackUrl],
     client_name: 'Bindify',
+    logo_uri: 'https://bindify.dev/logo-300.png',
+    client_uri: 'https://bindify.dev',
+    policy_uri: 'https://bindify.dev/privacy',
+    tos_uri: 'https://bindify.dev/terms',
+    contacts: ['support@bindify.dev'],
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
     token_endpoint_auth_method: 'none',
