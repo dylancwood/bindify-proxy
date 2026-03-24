@@ -9,4 +9,5 @@ export const REFRESH_CONFIG: Record<string, RefreshConfig> = {
   github:    { refreshIntervalMinutes: 1440 },
   figma:     { refreshIntervalMinutes: 1440 },
   todoist:   { refreshIntervalMinutes: 1440 }, // keep-alive cadence (no token refresh — tokens don't expire)
+  ticktick:  { refreshIntervalMinutes: 1440 }, // keep-alive cadence
 };
