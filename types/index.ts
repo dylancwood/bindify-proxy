@@ -33,7 +33,7 @@ export interface Connection {
   created_at: string;
 }
 
-export type ServiceId = 'linear' | 'todoist' | 'atlassian' | 'notion' | 'github' | 'figma';
+export type ServiceId = 'linear' | 'todoist' | 'atlassian' | 'notion' | 'github' | 'figma' | 'ticktick';
 export type ConnectionStatus = 'active' | 'error' | 'unused' | 'suspended';
 
 export interface Subscription {
