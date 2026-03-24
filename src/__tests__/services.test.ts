@@ -63,6 +63,35 @@ describe('Service Registry', () => {
     expect(svc!.config.dcrRegistrationUrl).toBe('https://mcp.notion.com/register');
   });
 
+  it('returns config for ticktick', () => {
+    const svc = getService('ticktick');
+    expect(svc).not.toBeNull();
+    expect(svc!.config.id).toBe('ticktick');
+    expect(svc!.config.mcpBaseUrl).toBe('https://mcp.ticktick.com/mcp');
+    expect(svc!.config.transport).toBe('streamable-http');
+    expect(svc!.config.usePKCE).toBe(true);
+    expect(svc!.config.useDCR).toBe(true);
+    expect(svc!.config.dcrRegistrationUrl).toBe('https://api.ticktick.com/oauth/register');
+  });
+
+  it('ticktick has DCR OAuth + API key (both supported)', () => {
+    const svc = getService('ticktick')!;
+    expect(svc.config.apiKey).toBeDefined();
+    expect(svc.config.apiKey!.inject).toEqual({ type: 'header', name: 'Authorization', prefix: 'Bearer ' });
+    expect(svc.config.apiKey!.validate.url).toBe('https://api.ticktick.com/open/v1/project');
+    expect(svc.config.apiKey!.validate.method).toBe('GET');
+    expect(svc.config.apiKey!.instructions).toContain('API Token');
+    expect(svc.config.clientIdEnvKey).toBeUndefined();
+    expect(svc.config.clientSecretEnvKey).toBeUndefined();
+    expect(svc.config.authorizationUrl).toBe('https://ticktick.com/oauth/authorize');
+    expect(svc.config.tokenUrl).toBe('https://api.ticktick.com/oauth/token');
+  });
+
+  it('ticktick is in REFRESH_CONFIG for keep-alive', () => {
+    expect(REFRESH_CONFIG).toHaveProperty('ticktick');
+    expect(REFRESH_CONFIG.ticktick.refreshIntervalMinutes).toBe(1440);
+  });
+
   it('returns config for github', () => {
     const svc = getService('github');
     expect(svc).not.toBeNull();
@@ -172,11 +201,11 @@ describe('Service Registry', () => {
     expect(svc).toBeNull();
   });
 
-  it('getAllServices returns all 6 services', () => {
+  it('getAllServices returns all 7 services', () => {
     const all = getAllServices();
-    expect(all).toHaveLength(6);
+    expect(all).toHaveLength(7);
     const ids = all.map(s => s.config.id).sort();
-    expect(ids).toEqual(['atlassian', 'figma', 'github', 'linear', 'notion', 'todoist']);
+    expect(ids).toEqual(['atlassian', 'figma', 'github', 'linear', 'notion', 'ticktick', 'todoist']);
   });
 
   it('service with apiKey config has required fields', () => {
