@@ -6,8 +6,9 @@ import { atlassian } from './atlassian';
 import { notion } from './notion';
 import { github } from './github';
 import { figma } from './figma';
+import { ticktick } from './ticktick';
 
-const services: Record<string, ServiceDefinition> = { linear, todoist, atlassian, notion, github, figma };
+const services: Record<string, ServiceDefinition> = { linear, todoist, atlassian, notion, github, figma, ticktick };
 
 export function getService(id: ServiceId | string): ServiceDefinition | null {
   return services[id] ?? null;
