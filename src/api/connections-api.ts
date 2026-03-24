@@ -8,6 +8,7 @@ const SERVICE_NAMES: Record<string, string> = {
   notion: 'Notion',
   github: 'GitHub',
   figma: 'Figma',
+  ticktick: 'TickTick',
 };
 
 export function generateDefaultLabel(service: string, index: number): string {
