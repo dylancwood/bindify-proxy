@@ -7,7 +7,7 @@ export const ticktick: ServiceDefinition = {
     authorizationUrl: 'https://ticktick.com/oauth/authorize',
     tokenUrl: 'https://api.ticktick.com/oauth/token',
     scopes: ['tasks:read', 'tasks:write'],
-    mcpBaseUrl: 'https://mcp.ticktick.com/mcp',
+    mcpBaseUrl: 'https://mcp.ticktick.com',
     transport: 'streamable-http',
     usePKCE: true,
     useDCR: true,

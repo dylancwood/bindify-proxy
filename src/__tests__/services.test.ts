@@ -67,7 +67,7 @@ describe('Service Registry', () => {
     const svc = getService('ticktick');
     expect(svc).not.toBeNull();
     expect(svc!.config.id).toBe('ticktick');
-    expect(svc!.config.mcpBaseUrl).toBe('https://mcp.ticktick.com/mcp');
+    expect(svc!.config.mcpBaseUrl).toBe('https://mcp.ticktick.com');
     expect(svc!.config.transport).toBe('streamable-http');
     expect(svc!.config.usePKCE).toBe(true);
     expect(svc!.config.useDCR).toBe(true);
