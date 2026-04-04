@@ -11,7 +11,7 @@ export class MaxUsersReachedError extends Error {
 /**
  * Ensures a user record exists in the database for the given Clerk user ID.
  * If the user does not exist, creates one with a free_trial plan and a
- * 24-hour trial period.
+ * 7-day trial period.
  *
  * @param options.maxUsers - Optional cap on total users. If defined and the cap is
  *   reached, throws MaxUsersReachedError for new users. Existing users are
@@ -40,7 +40,7 @@ export async function ensureUser(
     }
   }
 
-  const trialEndsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   await createUser(db, clerkUserId, trialEndsAt, options?.email);
 
   const user = await getUserById(db, clerkUserId);
