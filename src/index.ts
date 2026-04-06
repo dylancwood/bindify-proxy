@@ -27,7 +27,6 @@ import { BlocklistCache } from './bot-detection/blocklist-cache';
 import { log404Event } from './bot-detection/log-404';
 import { parseManagedKeys, computeKeyFingerprint } from './crypto';
 import type { ManagedKeyEntry } from './crypto';
-import { sendNewUserNotification } from './notifications';
 
 declare const BUILD_VERSION: string;
 const VERSION = typeof BUILD_VERSION !== 'undefined' ? BUILD_VERSION : 'dev';
@@ -134,8 +133,20 @@ async function authenticateRequest(request: Request, env: Env, ctx: ExecutionCon
   const maxUsers = env.MAX_USERS ? parseInt(env.MAX_USERS, 10) : undefined;
   try {
     const { user, isNew } = await ensureUser(env.DB, result.userId, { maxUsers, email: email ?? undefined });
-    if (isNew && env.SECRET_ENV_PREFIX === 'live') {
-      ctx.waitUntil(sendNewUserNotification(env, user));
+    if (isNew && env.ADMIN_NOTIFICATION_EMAIL) {
+      ctx.waitUntil(
+        env.DB.prepare(
+          `INSERT INTO email_queue (id, user_id, email_type, recipient, status)
+           SELECT ?, ?, 'new_user_admin', ?, 'pending'
+           WHERE NOT EXISTS (
+             SELECT 1 FROM email_queue
+             WHERE user_id = ? AND email_type = 'new_user_admin'
+             AND created_at > datetime('now', '-5 minutes')
+           )`
+        ).bind(
+          crypto.randomUUID(), user.id, env.ADMIN_NOTIFICATION_EMAIL, user.id
+        ).run()
+      );
     }
   } catch (err) {
     if (err instanceof MaxUsersReachedError) {
