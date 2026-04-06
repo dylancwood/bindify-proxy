@@ -1,4 +1,5 @@
 import {
+  getUserById,
   getUserByStripeCustomerId,
   setStripeCustomerId,
   setUserPlan,
@@ -105,6 +106,20 @@ async function handleCheckoutCompleted(env: Env, session: Record<string, unknown
   }
 
   await setStripeCustomerId(env.DB, userId, stripeCustomerId);
+
+  // Queue subscription confirmation email
+  const user = await getUserById(env.DB, userId);
+  if (user?.email) {
+    await env.DB.prepare(
+      `INSERT INTO email_queue (id, user_id, email_type, recipient, status)
+       SELECT ?, ?, 'subscription_confirmed', ?, 'pending'
+       WHERE NOT EXISTS (
+         SELECT 1 FROM email_queue
+         WHERE user_id = ? AND email_type = 'subscription_confirmed'
+         AND created_at > datetime('now', '-5 minutes')
+       )`
+    ).bind(crypto.randomUUID(), userId, user.email, userId).run();
+  }
 
   if (subscriptionId && env.STRIPE_SECRET_KEY) {
     const res = await stripeRequest(`/subscriptions/${subscriptionId}`, env.STRIPE_SECRET_KEY);
