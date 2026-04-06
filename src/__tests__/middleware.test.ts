@@ -95,9 +95,9 @@ describe('ensureUser', () => {
     expect(user.plan).toBe('free_trial');
     expect(user.trial_ends_at).not.toBeNull();
 
-    // trial_ends_at should be roughly 7 days from now
+    // trial_ends_at should be roughly 5 days from now
     const trialEnd = new Date(user.trial_ends_at!).getTime();
-    const expectedEnd = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    const expectedEnd = Date.now() + 5 * 24 * 60 * 60 * 1000;
     // Allow 5 seconds of tolerance
     expect(Math.abs(trialEnd - expectedEnd)).toBeLessThan(5000);
   });

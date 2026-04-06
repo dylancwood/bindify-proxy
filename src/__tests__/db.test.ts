@@ -107,7 +107,7 @@ beforeEach(async () => {
 
 describe('User queries', () => {
   it('creates and retrieves a user', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_1', trialEnd);
 
     const user = await getUserById(env.DB, 'user_1');
@@ -123,7 +123,7 @@ describe('User queries', () => {
   });
 
   it('does not throw when creating a user with an existing id', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_dup', trialEnd);
 
     // Second insert with same ID should not throw
@@ -138,7 +138,7 @@ describe('User queries', () => {
 
 describe('Connection queries', () => {
   const userId = 'user_conn';
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
   beforeEach(async () => {
     await createUser(env.DB, userId, trialEnd);
@@ -299,7 +299,7 @@ describe('Subscription and max connections', () => {
   const userId = 'user_sub';
 
   beforeEach(async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, userId, trialEnd);
   });
 
@@ -427,7 +427,7 @@ describe('Subscription and max connections', () => {
 
 describe('getStaleSuspendedConnections', () => {
   const userId = 'user_stale';
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
   beforeEach(async () => {
     await createUser(env.DB, userId, trialEnd);
@@ -500,7 +500,7 @@ describe('getStaleSuspendedConnections', () => {
 
 describe('deleteUserCascade', () => {
   const userId = 'user_cascade';
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
   beforeEach(async () => {
     await createUser(env.DB, userId, trialEnd);
@@ -566,7 +566,7 @@ describe('deleteUserCascade', () => {
 
 describe('auth_mode column', () => {
   const userId = 'user_authmode';
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
   beforeEach(async () => {
     await createUser(env.DB, userId, trialEnd);

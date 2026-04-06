@@ -85,7 +85,7 @@ beforeEach(async () => {
 
 describe('cleanupStaleSuspendedConnections', () => {
   const userId = 'user_cleanup';
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
   it('deletes connections suspended more than 60 days ago and their KV tokens', async () => {
     await createUser(env.DB, userId, trialEnd);
@@ -146,7 +146,7 @@ describe('cleanupStaleSuspendedConnections', () => {
 
 describe('getExistingConnectionIds', () => {
   const userId = 'user_batch';
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
   it('returns only IDs that exist', async () => {
     await createUser(env.DB, userId, trialEnd);

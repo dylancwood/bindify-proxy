@@ -87,7 +87,7 @@ beforeEach(async () => {
 
 describe('checkCanConnect', () => {
   it('allows connection during active free trial', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_trial', trialEnd);
 
     const result = await checkCanConnect(env.DB, 'user_trial');
@@ -144,7 +144,7 @@ describe('checkCanConnect', () => {
   });
 
   it('blocks when at plan limit', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_limit', trialEnd);
 
     // Free trial allows 2 connections; create two active connections
@@ -181,7 +181,7 @@ describe('checkCanConnect', () => {
 
 describe('checkAccessActive', () => {
   it('allows proxy access for active subscription', async () => {
-    const trialEnd = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_active_sub', trialEnd);
 
     // Set plan to bundle and clear trial

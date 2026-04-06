@@ -91,7 +91,7 @@ afterEach(() => {
 
 describe('handleDeleteAccount', () => {
   const userId = 'user_delete_test';
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
   it('successfully deletes all user data', async () => {
     // Set up user with stripe_customer_id

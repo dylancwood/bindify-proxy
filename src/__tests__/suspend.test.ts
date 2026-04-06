@@ -85,7 +85,7 @@ beforeEach(async () => {
 
 describe('suspendExcessConnections', () => {
   const userId = 'user_suspend';
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
   it('suspends newest connections when over limit', async () => {
     await createUser(env.DB, userId, trialEnd);

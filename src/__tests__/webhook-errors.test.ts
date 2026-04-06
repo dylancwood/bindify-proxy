@@ -147,7 +147,7 @@ describe('Webhook validation: checkout events', () => {
 
 describe('Webhook error propagation', () => {
   it('processWebhookEvent propagates handler errors', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_err', trialEnd);
     await setStripeCustomerId(env.DB, 'user_err', 'cus_err');
 

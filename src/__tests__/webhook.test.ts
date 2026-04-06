@@ -92,7 +92,7 @@ beforeEach(async () => {
 
 describe('Webhook: checkout.session.completed', () => {
   it('links stripe customer to user', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_checkout', trialEnd);
 
     await processWebhookEvent(env, {
@@ -113,7 +113,7 @@ describe('Webhook: checkout.session.completed', () => {
 
 describe('Webhook: customer.subscription.created', () => {
   it('creates subscription and updates user plan', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_sub_cre', trialEnd);
     await setStripeCustomerId(env.DB, 'user_sub_cre', 'cus_sub_cre');
 
@@ -145,7 +145,7 @@ describe('Webhook: customer.subscription.created', () => {
 
 describe('Webhook: customer.subscription.updated', () => {
   it('updates subscription in D1', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_sub_upd', trialEnd);
     await setStripeCustomerId(env.DB, 'user_sub_upd', 'cus_sub_upd');
 
@@ -176,7 +176,7 @@ describe('Webhook: customer.subscription.updated', () => {
   });
 
   it('sets plan to canceled when cancel_at_period_end is true (BIN-47)', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_cancel_end', trialEnd);
     await setStripeCustomerId(env.DB, 'user_cancel_end', 'cus_cancel_end');
 
@@ -205,7 +205,7 @@ describe('Webhook: customer.subscription.updated', () => {
   });
 
   it('restores plan when cancel_at_period_end is false (resubscription, BIN-47)', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_resub', trialEnd);
     await setStripeCustomerId(env.DB, 'user_resub', 'cus_resub');
 
@@ -252,7 +252,7 @@ describe('Webhook: customer.subscription.updated', () => {
   });
 
   it('sets plan to canceled when cancel_at is set (BIN-54)', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_cancel_at', trialEnd);
     await setStripeCustomerId(env.DB, 'user_cancel_at', 'cus_cancel_at');
 
@@ -286,7 +286,7 @@ describe('Webhook: customer.subscription.updated', () => {
 
 describe('Webhook: customer.subscription.deleted', () => {
   it('extracts current_period_end from items.data when absent on subscription root (BIN-360)', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_del_item', trialEnd);
     await setStripeCustomerId(env.DB, 'user_del_item', 'cus_del_item');
 
@@ -316,7 +316,7 @@ describe('Webhook: customer.subscription.deleted', () => {
   });
 
   it('falls back to ended_at when current_period_end is absent everywhere (BIN-360)', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_del_ended', trialEnd);
     await setStripeCustomerId(env.DB, 'user_del_ended', 'cus_del_ended');
 
@@ -342,7 +342,7 @@ describe('Webhook: customer.subscription.deleted', () => {
 
 describe('Webhook: invoice.payment_failed', () => {
   it('sets subscription to past_due', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_pf', trialEnd);
     await setStripeCustomerId(env.DB, 'user_pf', 'cus_pf');
 
@@ -371,7 +371,7 @@ describe('Webhook: invoice.payment_failed', () => {
   });
 
   it('sets past_due_since timestamp when payment fails', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_pf_ts', trialEnd);
     await setStripeCustomerId(env.DB, 'user_pf_ts', 'cus_pf_ts');
 
@@ -406,7 +406,7 @@ describe('Webhook: invoice.payment_failed', () => {
 
 describe('Webhook: invoice.paid', () => {
   it('clears past_due and restores access', async () => {
-    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
     await createUser(env.DB, 'user_ip', trialEnd);
     await setStripeCustomerId(env.DB, 'user_ip', 'cus_ip');
 
