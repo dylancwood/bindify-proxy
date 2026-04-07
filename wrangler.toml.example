@@ -90,6 +90,7 @@ crons = ["* * * * *", "21 5 * * *", "0 2,8,14,20 * * *", "0 4,10,16,22 * * *"]
 # ADMIN_URL = "https://app.staging.yourdomain.com"
 # CLERK_PUBLISHABLE_KEY = "YOUR_STAGING_CLERK_PUBLISHABLE_KEY"
 # SECRET_ENV_PREFIX = "stg"
+# MAX_USERS = "7"  # Cap total users in staging; E2E needs 5 test users + 1 preserved + margin
 #
 # [[env.staging.kv_namespaces]]
 # binding = "KV"
