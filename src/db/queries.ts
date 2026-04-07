@@ -204,6 +204,7 @@ export async function getStaleSuspendedConnections(db: D1Database, maxAgeDays: n
 }
 
 export async function deleteUserCascade(db: D1Database, userId: string): Promise<void> {
+  await db.prepare('DELETE FROM email_queue WHERE user_id = ?').bind(userId).run();
   await db.prepare('DELETE FROM subscriptions WHERE user_id = ?').bind(userId).run();
   await db.prepare('DELETE FROM connections WHERE user_id = ?').bind(userId).run();
   await db.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
