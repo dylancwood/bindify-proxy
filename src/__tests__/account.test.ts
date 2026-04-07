@@ -62,6 +62,19 @@ CREATE TABLE IF NOT EXISTS connection_events (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS email_queue (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    email_type TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    subject TEXT,
+    body TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    sent_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_connections_user_id ON connections(user_id);
 CREATE INDEX IF NOT EXISTS idx_connections_secret_1 ON connections(secret_url_segment_1);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
