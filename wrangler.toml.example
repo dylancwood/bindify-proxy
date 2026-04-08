@@ -74,8 +74,9 @@ SECRET_ENV_PREFIX = "live"
 # * * * * *           - Key rotation processing and orphan fingerprint detection (every minute)
 # 21 5 * * *          - Daily token refresh
 # 0 2,8,14,20 * * *   - Keepalive checks (every 6 hours)
+# 0 3 * * *           - Clean up Stripe events older than 90 days (daily at 3am UTC)
 # 0 4,10,16,22 * * *  - Consistency checks (every 6 hours)
-crons = ["* * * * *", "21 5 * * *", "0 2,8,14,20 * * *", "0 4,10,16,22 * * *"]
+crons = ["* * * * *", "21 5 * * *", "0 2,8,14,20 * * *", "0 4,10,16,22 * * *", "0 3 * * *"]
 
 # Optional: staging environment
 # [env.staging]

@@ -16,6 +16,7 @@ import { verifyWebhookSignature } from './billing/stripe';
 import { processWebhookEvent, isHandledEvent } from './billing/webhook';
 import { getUserById } from './db/queries';
 import { cleanupStaleSuspendedConnections } from './cleanup';
+import { deleteExpiredStripeEvents } from './db/stripe-events';
 import { handleScheduledRefresh } from './scheduler';
 import { detectOrphanedFingerprints, processRotationRequests } from './rotation';
 import { checkKvD1Consistency } from './consistency';
@@ -685,6 +686,13 @@ export default {
       case '0 4,10,16,22 * * *': {
         const result = await checkKvD1Consistency(env);
         log.info('Consistency check completed', result);
+        break;
+      }
+      case '0 3 * * *': {
+        const deleted = await deleteExpiredStripeEvents(env.DB, 90);
+        if (deleted > 0) {
+          log.info('Stripe events cleanup completed', { deletedCount: deleted });
+        }
         break;
       }
       case '* * * * *': {
