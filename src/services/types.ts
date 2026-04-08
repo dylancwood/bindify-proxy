@@ -69,6 +69,10 @@ export interface ServiceConfig {
   healthCheckPattern?: RegExp;
   apiKey?: ApiKeyConfig;
   requiresRefresh?: boolean;
+  expectedErrors?: {
+    keepaliveSessionIdMissing?: boolean;
+    httpGetNotSupported?: boolean;
+  };
 }
 
 export interface ServiceOverrides {

@@ -13,6 +13,10 @@ export const todoist: ServiceDefinition = {
     transport: 'streamable-http',
     usePKCE: false,
     requiresRefresh: false,
+    expectedErrors: {
+      keepaliveSessionIdMissing: true,
+      httpGetNotSupported: true,
+    },
     apiKey: {
       inject: { type: 'header', name: 'Authorization', prefix: 'Bearer ' },
       validate: {

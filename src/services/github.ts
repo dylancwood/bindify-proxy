@@ -12,6 +12,9 @@ export const github: ServiceDefinition = {
     mcpBaseUrl: 'https://api.githubcopilot.com/mcp',
     transport: 'streamable-http',
     usePKCE: false,
+    expectedErrors: {
+      httpGetNotSupported: true,
+    },
     apiKey: {
       inject: { type: 'header', name: 'Authorization', prefix: 'Bearer ' },
       validate: {
