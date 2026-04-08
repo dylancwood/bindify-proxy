@@ -120,6 +120,42 @@ describe('Webhook: checkout.session.completed', () => {
     expect(user).not.toBeNull();
     expect(user!.stripe_customer_id).toBe('cus_stripe_123');
   });
+
+  it('writes bindify_user_id to Stripe Customer metadata (BIN-382)', async () => {
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    await createUser(env.DB, 'user_meta', trialEnd);
+
+    // Mock fetch to intercept the Stripe API call
+    const originalFetch = globalThis.fetch;
+    const fetchCalls: { url: string; body: string }[] = [];
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('api.stripe.com/v1/customers/')) {
+        fetchCalls.push({ url, body: init?.body as string });
+        return new Response(JSON.stringify({ id: 'cus_meta_123' }), { status: 200 });
+      }
+      return originalFetch(input, init);
+    };
+
+    try {
+      await processWebhookEvent(env, {
+        id: 'evt_meta_1',
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            client_reference_id: 'user_meta',
+            customer: 'cus_meta_123',
+          },
+        },
+      });
+
+      const metadataCall = fetchCalls.find(c => c.url.includes('/customers/cus_meta_123'));
+      expect(metadataCall).toBeDefined();
+      expect(metadataCall!.body).toContain('metadata%5Bbindify_user_id%5D=user_meta');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe('Webhook: customer.subscription.created', () => {

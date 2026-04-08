@@ -116,6 +116,22 @@ async function handleCheckoutCompleted(env: Env, session: Record<string, unknown
 
   await setStripeCustomerId(env.DB, userId, stripeCustomerId);
 
+  // Write bindify_user_id to Stripe Customer metadata for bidirectional lookup (BIN-382)
+  if (env.STRIPE_SECRET_KEY) {
+    try {
+      await stripeRequest(`/customers/${stripeCustomerId}`, env.STRIPE_SECRET_KEY, {
+        method: 'POST',
+        body: { 'metadata[bindify_user_id]': userId },
+      });
+    } catch (err) {
+      log.warn('Failed to set Stripe customer metadata', {
+        handler: 'handleCheckoutCompleted',
+        stripeCustomerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // Queue subscription confirmation email
   const user = await getUserById(env.DB, userId);
   if (user?.email) {
