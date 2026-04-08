@@ -12,6 +12,7 @@ import { log } from './logger';
 import { parseTokenResponseBody, validateTokenData, validateDecryptedTokens } from './token-parsing';
 import { validateTokensBeforeWrite } from './token-validation';
 import { writeConnectionEvent } from './db/connection-events';
+import { resolveEventCategory } from './services/expected-errors';
 import { fetchMcpToolsList } from './api/validate-application';
 import { withProxyCache } from './proxy/kv-cache';
 
@@ -331,6 +332,10 @@ export async function keepaliveManagedConnection(connection: Connection, env: En
         upstreamStatus,
       }).catch(() => {});
     } else {
+      const resolvedCategory = resolveEventCategory(
+        { category: 'transient_error', detail: `Keep-alive error: ${message}`, upstreamStatus },
+        connection.service
+      );
       log.error('Keep-alive transient failure', undefined, {
         connectionId: connection.id,
         service: connection.service,
@@ -342,7 +347,11 @@ export async function keepaliveManagedConnection(connection: Connection, env: En
         category: 'transient_error',
         detail: `Keep-alive error: ${message}`,
         upstreamStatus,
-      }).catch(() => {});
+      }, connection.service).catch(() => {});
+
+      if (resolvedCategory === 'expected') {
+        return true;
+      }
     }
     return false;
   }

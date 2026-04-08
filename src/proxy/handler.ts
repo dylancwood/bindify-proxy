@@ -972,7 +972,7 @@ export async function handleProxyStreamableHTTP(request: Request, env: Env, ctx?
           category: 'upstream_error',
           upstreamStatus: upstreamResponse.status,
           detail: `${params.service}:streamable-http:get`,
-        }).catch(() => {})
+        }, params.service).catch(() => {})
       );
     }
 
