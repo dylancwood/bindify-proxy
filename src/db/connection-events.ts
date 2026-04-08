@@ -1,3 +1,5 @@
+import { resolveEventCategory } from '../services/expected-errors';
+
 export interface ConnectionEvent {
   connectionId: string | null;
   userId?: string;
@@ -110,8 +112,12 @@ async function checkDedup(db: D1Database, event: ConnectionEvent): Promise<boole
   return recent === null;
 }
 
-export async function writeConnectionEvent(db: D1Database, event: ConnectionEvent): Promise<void> {
-  const shouldWrite = await checkDedup(db, event);
+export async function writeConnectionEvent(db: D1Database, event: ConnectionEvent, service?: string): Promise<void> {
+  const resolvedEvent = service
+    ? { ...event, category: resolveEventCategory(event, service) }
+    : event;
+
+  const shouldWrite = await checkDedup(db, resolvedEvent);
   if (!shouldWrite) return;
 
   const id = crypto.randomUUID();
@@ -123,13 +129,13 @@ export async function writeConnectionEvent(db: D1Database, event: ConnectionEven
     )
     .bind(
       id,
-      event.connectionId ?? null,
-      event.userId ?? null,
-      event.eventType,
-      event.category,
-      event.detail ?? null,
-      event.upstreamStatus ?? null,
-      event.encryptedPayload ?? null
+      resolvedEvent.connectionId ?? null,
+      resolvedEvent.userId ?? null,
+      resolvedEvent.eventType,
+      resolvedEvent.category,
+      resolvedEvent.detail ?? null,
+      resolvedEvent.upstreamStatus ?? null,
+      resolvedEvent.encryptedPayload ?? null
     )
     .run();
 
