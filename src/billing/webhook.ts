@@ -16,9 +16,11 @@ import { suspendExcessConnections, reactivateSuspendedConnections } from './susp
 import { stripeRequest } from './stripe';
 import { withProxyCache } from '../proxy/kv-cache';
 import { log } from '../logger';
+import { logStripeEvent } from '../db/stripe-events';
 import type { Env } from '../index';
 
 interface StripeEvent {
+  id: string;
   type: string;
   data: {
     object: Record<string, unknown>;
@@ -40,6 +42,13 @@ export function isHandledEvent(type: string): boolean {
 
 export async function processWebhookEvent(env: Env, event: StripeEvent): Promise<void> {
   try {
+    // Log event for audit trail (best-effort, don't fail the webhook)
+    try {
+      await logStripeEvent(env.DB, event);
+    } catch (logErr) {
+      log.warn('Failed to log stripe event', { error: logErr instanceof Error ? logErr.message : String(logErr) });
+    }
+
     switch (event.type) {
       case 'checkout.session.completed':
         await handleCheckoutCompleted(env, event.data.object);

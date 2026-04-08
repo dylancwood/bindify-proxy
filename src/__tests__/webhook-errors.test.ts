@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS connection_events (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS stripe_events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    stripe_customer_id TEXT,
+    user_id TEXT,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_connections_user_id ON connections(user_id);
 CREATE INDEX IF NOT EXISTS idx_connections_secret_1 ON connections(secret_url_segment_1);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
@@ -76,6 +85,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await env.DB.prepare('DELETE FROM stripe_events').run();
   await env.DB.prepare('DELETE FROM subscriptions').run();
   await env.DB.prepare('DELETE FROM connection_events').run();
   await env.DB.prepare('DELETE FROM connections').run();
@@ -85,6 +95,7 @@ beforeEach(async () => {
 describe('Webhook validation: subscription events', () => {
   it('throws on missing customer in subscription.updated', async () => {
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_1',
       type: 'customer.subscription.updated',
       data: { object: { id: 'sub_1', status: 'active', items: { data: [{ quantity: 1 }] } } },
     })).rejects.toThrow(/customer/i);
@@ -92,6 +103,7 @@ describe('Webhook validation: subscription events', () => {
 
   it('throws on missing items in subscription.updated', async () => {
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_2',
       type: 'customer.subscription.updated',
       data: { object: { id: 'sub_1', customer: 'cus_1', status: 'active' } },
     })).rejects.toThrow(/items/i);
@@ -99,6 +111,7 @@ describe('Webhook validation: subscription events', () => {
 
   it('throws on empty items.data in subscription.updated', async () => {
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_3',
       type: 'customer.subscription.updated',
       data: { object: { id: 'sub_1', customer: 'cus_1', status: 'active', items: { data: [] } } },
     })).rejects.toThrow(/items/i);
@@ -106,6 +119,7 @@ describe('Webhook validation: subscription events', () => {
 
   it('throws on missing customer in subscription.deleted', async () => {
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_4',
       type: 'customer.subscription.deleted',
       data: { object: { id: 'sub_1', current_period_end: 1234567890 } },
     })).rejects.toThrow(/customer/i);
@@ -113,6 +127,7 @@ describe('Webhook validation: subscription events', () => {
 
   it('throws on missing current_period_end in subscription.deleted', async () => {
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_5',
       type: 'customer.subscription.deleted',
       data: { object: { id: 'sub_1', customer: 'cus_1' } },
     })).rejects.toThrow(/current_period_end/i);
@@ -123,6 +138,7 @@ describe('Webhook validation: invoice events', () => {
   it('does not throw when invoice.payment_failed has no subscription (returns silently with warning)', async () => {
     // Missing subscription is a valid case (one-off invoices) — should not throw
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_6',
       type: 'invoice.payment_failed',
       data: { object: { customer: 'cus_1' } },
     })).resolves.toBeUndefined();
@@ -130,6 +146,7 @@ describe('Webhook validation: invoice events', () => {
 
   it('does not throw when invoice.paid has no subscription (returns silently with warning)', async () => {
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_7',
       type: 'invoice.paid',
       data: { object: { customer: 'cus_1' } },
     })).resolves.toBeUndefined();
@@ -139,6 +156,7 @@ describe('Webhook validation: invoice events', () => {
 describe('Webhook validation: checkout events', () => {
   it('does not throw when checkout has no client_reference_id (returns silently with warning)', async () => {
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_8',
       type: 'checkout.session.completed',
       data: { object: { customer: 'cus_1' } },
     })).resolves.toBeUndefined();
@@ -153,6 +171,7 @@ describe('Webhook error propagation', () => {
 
     // Missing items entirely — should throw a validation error
     await expect(processWebhookEvent(env, {
+      id: 'evt_err_9',
       type: 'customer.subscription.updated',
       data: { object: { id: 'sub_err', customer: 'cus_err', status: 'active' } },
     })).rejects.toThrow();

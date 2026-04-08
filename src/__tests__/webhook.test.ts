@@ -67,6 +67,15 @@ CREATE TABLE IF NOT EXISTS connection_events (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS stripe_events (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    stripe_customer_id TEXT,
+    user_id TEXT,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_connections_user_id ON connections(user_id);
 CREATE INDEX IF NOT EXISTS idx_connections_secret_1 ON connections(secret_url_segment_1);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
@@ -84,6 +93,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await env.DB.prepare('DELETE FROM stripe_events').run();
   await env.DB.prepare('DELETE FROM subscriptions').run();
   await env.DB.prepare('DELETE FROM connection_events').run();
   await env.DB.prepare('DELETE FROM connections').run();
@@ -96,6 +106,7 @@ describe('Webhook: checkout.session.completed', () => {
     await createUser(env.DB, 'user_checkout', trialEnd);
 
     await processWebhookEvent(env, {
+      id: 'evt_checkout_1',
       type: 'checkout.session.completed',
       data: {
         object: {
@@ -120,6 +131,7 @@ describe('Webhook: customer.subscription.created', () => {
     const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
     await processWebhookEvent(env, {
+      id: 'evt_sub_cre_1',
       type: 'customer.subscription.created',
       data: {
         object: {
@@ -152,6 +164,7 @@ describe('Webhook: customer.subscription.updated', () => {
     const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
     await processWebhookEvent(env, {
+      id: 'evt_sub_upd_1',
       type: 'customer.subscription.updated',
       data: {
         object: {
@@ -183,6 +196,7 @@ describe('Webhook: customer.subscription.updated', () => {
     const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
     await processWebhookEvent(env, {
+      id: 'evt_sub_upd_cancel_1',
       type: 'customer.subscription.updated',
       data: {
         object: {
@@ -213,6 +227,7 @@ describe('Webhook: customer.subscription.updated', () => {
 
     // First: cancel at period end
     await processWebhookEvent(env, {
+      id: 'evt_resub_cancel_1',
       type: 'customer.subscription.updated',
       data: {
         object: {
@@ -232,6 +247,7 @@ describe('Webhook: customer.subscription.updated', () => {
 
     // Then: resubscribe (cancel_at_period_end flipped to false)
     await processWebhookEvent(env, {
+      id: 'evt_resub_active_1',
       type: 'customer.subscription.updated',
       data: {
         object: {
@@ -260,6 +276,7 @@ describe('Webhook: customer.subscription.updated', () => {
     const cancelAt = Math.floor(Date.now() / 1000) + 31 * 24 * 60 * 60;
 
     await processWebhookEvent(env, {
+      id: 'evt_cancel_at_1',
       type: 'customer.subscription.updated',
       data: {
         object: {
@@ -293,6 +310,7 @@ describe('Webhook: customer.subscription.deleted', () => {
     const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
     await processWebhookEvent(env, {
+      id: 'evt_sub_del_item_1',
       type: 'customer.subscription.deleted',
       data: {
         object: {
@@ -323,6 +341,7 @@ describe('Webhook: customer.subscription.deleted', () => {
     const endedAt = Math.floor(Date.now() / 1000);
 
     await processWebhookEvent(env, {
+      id: 'evt_sub_del_ended_1',
       type: 'customer.subscription.deleted',
       data: {
         object: {
@@ -356,6 +375,7 @@ describe('Webhook: invoice.payment_failed', () => {
     });
 
     await processWebhookEvent(env, {
+      id: 'evt_pf_1',
       type: 'invoice.payment_failed',
       data: {
         object: {
@@ -386,6 +406,7 @@ describe('Webhook: invoice.payment_failed', () => {
 
     const before = Date.now();
     await processWebhookEvent(env, {
+      id: 'evt_pf_ts_1',
       type: 'invoice.payment_failed',
       data: {
         object: {
@@ -420,6 +441,7 @@ describe('Webhook: invoice.paid', () => {
     });
 
     await processWebhookEvent(env, {
+      id: 'evt_ip_1',
       type: 'invoice.paid',
       data: {
         object: {
